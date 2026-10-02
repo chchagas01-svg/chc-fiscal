@@ -60,8 +60,9 @@ async function registrarAudit(
   );
 }
 
-async function inserirNota(empresaId: number, competencia: string, nota: ParsedNota): Promise<void> {
-  await query(
+// Retorna true se inserida, false se já existia (duplicata silenciosa)
+async function inserirNota(empresaId: number, competencia: string, nota: ParsedNota): Promise<boolean> {
+  const result = await query(
     `INSERT INTO notas (
        empresa_id, chave_acesso, tipo_doc, numero, serie, data_emissao, competencia,
        natureza, cnpj_emitente, nome_emitente, cnpj_tomador, nome_tomador,
@@ -78,7 +79,8 @@ async function inserirNota(empresaId: number, competencia: string, nota: ParsedN
        $18,$19,$20,$21,$22,
        $23,$24,
        $25,$26,$27
-     )`,
+     )
+     ON CONFLICT (chave_acesso) DO NOTHING`,
     [
       empresaId, nota.chaveAcesso, nota.tipoDoc, nota.numero ?? null, nota.serie ?? null,
       nota.dataEmissao, competencia,
@@ -91,6 +93,7 @@ async function inserirNota(empresaId: number, competencia: string, nota: ParsedN
       nota.cancelada, nota.chaveSubstituta ?? null, nota.xmlRaw,
     ]
   );
+  return (result.rowCount ?? 0) > 0;
 }
 
 async function capturarEmpresa(
@@ -121,26 +124,20 @@ async function capturarEmpresa(
       resultado.tipos_processados.push(tipo);
 
       for (const item of items) {
-        // Idempotência — não reimportar chave já presente
-        const existe = await query(
-          'SELECT id FROM notas WHERE chave_acesso = $1',
-          [item.chave]
-        );
-        if (existe.rows.length > 0) {
-          resultado.notas_ignoradas_duplicatas++;
-          continue;
-        }
-
         // Download do XML
         const xml = await qyonClient.downloadXml(tipo, item.chave, empresa.qyon_access_key);
 
         // Parse
         const notas = await parseXml(xml);
 
-        // Inserção de cada nota parseada
+        // Inserção — ON CONFLICT DO NOTHING garante idempotência
         for (const nota of notas) {
-          await inserirNota(empresa.id, competencia, nota);
-          resultado.notas_importadas++;
+          const inserida = await inserirNota(empresa.id, competencia, nota);
+          if (inserida) {
+            resultado.notas_importadas++;
+          } else {
+            resultado.notas_ignoradas_duplicatas++;
+          }
         }
       }
     } catch (err) {
