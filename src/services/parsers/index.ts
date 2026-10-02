@@ -1,6 +1,7 @@
 import { ParsedNota } from '../../types/nota';
 import { parseNfseNacional } from './parseNfseNacional';
 import { parseNfseAbrasf } from './parseNfseAbrasf';
+import { parseNfseSp } from './parseNfseSp';
 import { parseNfe } from './parseNfe';
 import { parseCte } from './parseCte';
 
@@ -33,17 +34,13 @@ export async function parseXml(xml: string): Promise<ParsedNota[]> {
   }
 
   // NF-e modelo 55 ou NFC-e modelo 65
+  // ATENÇÃO: a Prefeitura de SP usa <NFe> como root de NFS-e — detecção por <ChaveNFe>
   if (tag === 'nfeProc' || tag === 'NFe') {
-    try {
-      return [await parseNfe(xml, 'nfe')];
-    } catch (e) {
-      // Alguns municípios emitem NFS-e com tag <NFe> — tentar fallback ABRASF
-      if (e instanceof Error && e.message.includes('infNFe')) {
-        try { return await parseNfseAbrasf(xml); } catch {}
-        try { return [await parseNfseNacional(xml)]; } catch {}
-      }
-      throw e;
+    if (xml.includes('<ChaveNFe>') || xml.includes('<ChaveNFe ') ||
+        xml.includes('<DataEmissaoNFe>')) {
+      return [await parseNfseSp(xml)];
     }
+    return [await parseNfe(xml, 'nfe')];
   }
 
   if (tag === 'nfceProc') {
