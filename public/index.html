@@ -340,6 +340,21 @@ body {
         return `<span class="chip ${cls}"><span class="dot"></span>${lbl}: ${stage ? statusLbl(stage.status) : 'Pendente'}</span>`;
       };
       const ap = e.apuracao;
+      const nt = e.notas;
+      const notasHtml = nt ? (() => {
+        const receita = Number(nt.total_receita || 0);
+        const compras = Number(nt.total_compras || 0);
+        const total = Number(nt.total_notas || 0);
+        const fields = [
+          ['Notas', total + ' doc.'],
+          ['Receita', brl(receita)],
+        ];
+        if (compras > 0) fields.push(['Compras', brl(compras)]);
+        return `<div class="ap-grid" style="margin-top:10px">${fields.map(([l,v]) =>
+          `<div class="ap-item"><div class="ap-lbl">${l}</div><div class="ap-val">${v}</div></div>`
+        ).join('')}</div>`;
+      })() : '';
+
       const apHtml = ap ? (() => {
         const fields = [
           ['DAS', ap.das_devido], ['PIS', ap.pis_devido], ['COFINS', ap.cofins_devida],
@@ -356,7 +371,7 @@ body {
           <span class="regime-pill">${rl}</span>
         </div>
         <div class="stages">${chip('Captura', cap)}${chip('Apuração', apu)}</div>
-        ${apHtml}${note}
+        ${notasHtml}${apHtml}${note}
       </div>`;
     }).join('');
   }

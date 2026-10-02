@@ -90,6 +90,22 @@ router.get('/status/:competencia', async (req: Request, res: Response) => {
       [competencia]
     );
 
+    // Contagem e total de notas capturadas por empresa
+    const notasRes = await query(
+      `SELECT empresa_id,
+              COUNT(*) AS total_notas,
+              SUM(valor_liquido) AS total_liquido,
+              SUM(CASE WHEN natureza IN ('venda','servico_prestado') THEN valor_liquido ELSE 0 END) AS total_receita,
+              SUM(CASE WHEN natureza = 'compra' THEN valor_liquido ELSE 0 END) AS total_compras
+       FROM notas WHERE competencia = $1 AND cancelada = false
+       GROUP BY empresa_id`,
+      [competencia]
+    );
+    const notasMap: Record<number, Record<string, unknown>> = {};
+    for (const row of notasRes.rows) {
+      notasMap[Number(row['empresa_id'])] = row as Record<string, unknown>;
+    }
+
     // Apurações aprovadas
     const apuracoesRes = await query(
       `SELECT empresa_id, das_devido, pis_devido, cofins_devida, iss_devido,
@@ -131,6 +147,7 @@ router.get('/status/:competencia', async (req: Request, res: Response) => {
       regime: row['regime'],
       etapas: row['etapas'] ?? {},
       apuracao: apMap[Number(row['id'])] ?? null,
+      notas: notasMap[Number(row['id'])] ?? null,
     }));
 
     res.json({
