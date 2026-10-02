@@ -120,6 +120,7 @@ async function capturarEmpresa(
         tipo, empresa.qyon_access_key, dataInicio, dataFim
       );
 
+      console.log(`[captura] ${empresa.cnpj} ${tipo}: ${items.length} item(s) listado(s)`);
       if (items.length === 0) continue;
       resultado.tipos_processados.push(tipo);
 
@@ -143,6 +144,7 @@ async function capturarEmpresa(
         } catch (itemErr) {
           // Isola falha de 1 documento para não travar os demais
           const msg = itemErr instanceof Error ? itemErr.message : String(itemErr);
+          console.error(`[captura] ${empresa.cnpj} ${tipo} chave=${item.chave.substring(0, 12)}: ${msg}`);
           resultado.erros.push(`${tipo}[${item.chave.substring(0, 8)}]: ${msg}`);
           await registrarAudit(competencia, empresa.id, `captura_item_erro`, { tipo, chave: item.chave }, msg);
         }

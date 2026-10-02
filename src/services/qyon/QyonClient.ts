@@ -243,10 +243,15 @@ async function listarDirecao(
     if (!response.success) break;
 
     const rawItems = response.list ?? [];
-    allItems.push(...mapItems(rawItems, tipo, fluxo));
+    const mapped = mapItems(rawItems, tipo, fluxo);
+    allItems.push(...mapped);
 
-    const totalSize = response.totalSize ?? rawItems.length;
-    if (allItems.length >= totalSize || rawItems.length < PAGE_SIZE) break;
+    const totalSize = response.totalSize ?? 0;
+    console.log(`[qyon] ${tipo} fluxo=${fluxo} pag=${page}: ${rawItems.length} raw, ${mapped.length} mapeados, totalSize=${totalSize}`);
+
+    // Se API não suporta paginação ou retornou tudo de uma vez → sair
+    if (rawItems.length === 0 || rawItems.length < PAGE_SIZE) break;
+    if (totalSize > 0 && allItems.length >= totalSize) break;
     page++;
   }
 
