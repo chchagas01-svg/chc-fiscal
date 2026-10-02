@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --ignore-scripts
 COPY . .
-RUN npm run build
+RUN npm run build && cp src/migrations/*.sql dist/migrations/
 
 FROM node:24-alpine AS runner
 WORKDIR /app
