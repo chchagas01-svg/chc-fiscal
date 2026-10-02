@@ -3,15 +3,33 @@ import http from 'http';
 import { TipoDoc } from '../../types/nota';
 
 const QYON_BASE_URL = 'https://api-integracao.qyon.info';
+const QYON_TOKEN_URL = 'https://apigw-qyon-authorization-prd.qyon.com/oauth/token';
 const REQUEST_TIMEOUT_MS = 30_000;
 const RETRY_DELAYS_MS = [1_000, 4_000, 16_000];
 
-// Campos que o Qyon pode usar para a chave de acesso do documento
-// Verificar com resposta real — nomes exatos podem variar
-const CHAVE_FIELDS = ['chave', 'chNFSe', 'chNFe', 'chNFCe', 'chCTe', 'id', 'chaveDanfe'];
+// Per-tipo: which query param carries the direction (1=Entrada, 2=Saída)
+const TYPE_PARAM: Partial<Record<TipoDoc, string>> = {
+  nfse:  'nfseType',
+  nfe:   'nfeType',
+  nfce:  'nfceType',
+  nfcom: 'nfcomType',
+  nf3e:  'nf3eType',
+  cte:   'cteType',   // optional per spec
+};
+
+// Field(s) tried in order to extract the document key for download
+const CHAVE_FIELDS_POR_TIPO: Record<TipoDoc, string[]> = {
+  nfse:  ['depotid', 'key'],          // spec: "Depot Id da NFS-e"
+  nfe:   ['chNFe',   'depotid', 'key'],
+  nfce:  ['chNFCe',  'depotid', 'key'],
+  cte:   ['chCTe',   'depotid', 'key'],
+  nfcom: ['chNFCom', 'depotid', 'key'],
+  nf3e:  ['chNF3e',  'depotid', 'key'],
+};
 
 export interface QyonDocItem {
   chave: string;
+  fluxo: 1 | 2;       // 1=Entrada, 2=Saída
   numero?: string;
   dataEmissao?: string;
   cancelada?: boolean;
@@ -19,16 +37,66 @@ export interface QyonDocItem {
 }
 
 interface QyonListResponse {
-  // Nomes alternativos comuns em APIs brasileiras — verificar com resposta real
-  content?: unknown[];
-  data?: unknown[];
-  items?: unknown[];
-  result?: unknown[];
+  success: boolean;
+  totalSize?: number;
+  list?: unknown[];
   [key: string]: unknown;
 }
 
-function extractChave(item: Record<string, unknown>): string | undefined {
-  for (const field of CHAVE_FIELDS) {
+// In-memory JWT — initialised from env, refreshed automatically on 401
+let currentJwt: string = process.env['QYON_JWT'] ?? '';
+
+async function refreshJwt(): Promise<void> {
+  const refreshToken = process.env['QYON_REFRESH_TOKEN'];
+  const clientId     = process.env['QYON_CLIENT_ID'];
+  const clientSecret = process.env['QYON_CLIENT_SECRET'];
+
+  if (!refreshToken || !clientId || !clientSecret) {
+    throw new Error(
+      'JWT expirado e refresh_token/client_id/client_secret não configurados. ' +
+      'Defina QYON_JWT, QYON_REFRESH_TOKEN, QYON_CLIENT_ID, QYON_CLIENT_SECRET no Railway.'
+    );
+  }
+
+  const body = new URLSearchParams({
+    grant_type:    'refresh_token',
+    refresh_token: refreshToken,
+    client_id:     clientId,
+    client_secret: clientSecret,
+  }).toString();
+
+  const { respBody, status } = await rawPost(QYON_TOKEN_URL, body, {
+    'Content-Type': 'application/x-www-form-urlencoded',
+  });
+
+  if (status !== 200) {
+    throw new Error(`Falha ao renovar JWT Qyon: HTTP ${status} — ${respBody.substring(0, 200)}`);
+  }
+
+  const parsed = JSON.parse(respBody) as { access_token?: string };
+  if (!parsed.access_token) {
+    throw new Error(`Resposta de refresh sem access_token: ${respBody.substring(0, 200)}`);
+  }
+
+  currentJwt = parsed.access_token;
+}
+
+function getAuthHeader(): Record<string, string> {
+  if (!currentJwt) {
+    throw new Error(
+      'QYON_JWT não configurado. Defina a variável de ambiente no Railway.'
+    );
+  }
+  return { Authorization: `Bearer ${currentJwt}` };
+}
+
+function toQyonDate(iso: string): string {
+  // Converte YYYY-MM-DD → yyyyMMdd
+  return iso.replace(/-/g, '');
+}
+
+function extractChave(item: Record<string, unknown>, tipo: TipoDoc): string | undefined {
+  for (const field of CHAVE_FIELDS_POR_TIPO[tipo]) {
     if (typeof item[field] === 'string' && item[field]) {
       return item[field] as string;
     }
@@ -36,37 +104,47 @@ function extractChave(item: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-function extractItems(response: QyonListResponse): unknown[] {
-  return (
-    response.content ??
-    response.data ??
-    response.items ??
-    response.result ??
-    (Array.isArray(response) ? response : [])
-  );
-}
-
-function httpGet(url: string, headers: Record<string, string>): Promise<{ body: string; status: number }> {
+function rawGet(url: string, headers: Record<string, string>): Promise<{ body: string; status: number }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const lib = parsed.protocol === 'https:' ? https : http;
-
     const req = lib.get(
       { hostname: parsed.hostname, path: parsed.pathname + parsed.search, headers },
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () =>
-          resolve({ body: Buffer.concat(chunks).toString('utf-8'), status: res.statusCode ?? 0 })
-        );
+        res.on('end', () => resolve({ body: Buffer.concat(chunks).toString('utf-8'), status: res.statusCode ?? 0 }));
         res.on('error', reject);
       }
     );
-
     req.on('error', reject);
-    req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-      req.destroy(new Error(`Timeout após ${REQUEST_TIMEOUT_MS / 1000}s: ${url}`));
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => req.destroy(new Error(`Timeout: ${url}`)));
+  });
+}
+
+function rawPost(
+  url: string,
+  body: string,
+  headers: Record<string, string>
+): Promise<{ respBody: string; status: number }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const options = {
+      hostname: parsed.hostname,
+      path:     parsed.pathname + parsed.search,
+      method:   'POST',
+      headers:  { ...headers, 'Content-Length': Buffer.byteLength(body) },
+    };
+    const req = https.request(options, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => resolve({ respBody: Buffer.concat(chunks).toString('utf-8'), status: res.statusCode ?? 0 }));
+      res.on('error', reject);
     });
+    req.on('error', reject);
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => req.destroy(new Error(`Timeout: ${url}`)));
+    req.write(body);
+    req.end();
   });
 }
 
@@ -75,13 +153,10 @@ async function httpGetWithRetry(
   headers: Record<string, string>
 ): Promise<{ body: string; status: number }> {
   let lastError: Error = new Error('Nenhuma tentativa realizada');
-
   for (let attempt = 0; attempt < RETRY_DELAYS_MS.length + 1; attempt++) {
     try {
-      const result = await httpGet(url, headers);
-      if (result.status === 429 || result.status >= 500) {
-        throw new Error(`HTTP ${result.status}`);
-      }
+      const result = await rawGet(url, headers);
+      if (result.status === 429 || result.status >= 500) throw new Error(`HTTP ${result.status}`);
       return result;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
@@ -90,48 +165,96 @@ async function httpGetWithRetry(
       }
     }
   }
-
   throw lastError;
 }
 
-function authHeaders(accessKey: string): Record<string, string> {
-  return { Authorization: `Bearer ${accessKey}` };
+// Chama a listagem para uma direção (1 ou 2) e retorna os itens
+async function listarDirecao(
+  tipo: TipoDoc,
+  accessKey: string,
+  startDate: string,
+  endDate: string,
+  fluxo: 1 | 2
+): Promise<QyonDocItem[]> {
+  const typeParam = TYPE_PARAM[tipo];
+  const params = new URLSearchParams({
+    accessKey,
+    startDate,
+    endDate,
+    ...(typeParam ? { [typeParam]: String(fluxo) } : {}),
+  });
+  const url = `${QYON_BASE_URL}/v2/${tipo}/list?${params}`;
+
+  let { body, status } = await httpGetWithRetry(url, getAuthHeader());
+
+  // JWT expirado → tentar renovar e repetir uma vez
+  if (status === 401) {
+    await refreshJwt();
+    const retry = await httpGetWithRetry(url, getAuthHeader());
+    body   = retry.body;
+    status = retry.status;
+  }
+
+  if (status === 401) throw new Error(`Credencial Qyon inválida (401) após refresh`);
+  if (status === 404) return [];
+  if (status >= 400)  throw new Error(`Qyon retornou HTTP ${status} ao listar ${tipo}`);
+
+  const response = JSON.parse(body) as QyonListResponse;
+  if (!response.success) return [];
+  const rawItems = response.list ?? [];
+
+  return rawItems
+    .map((item) => {
+      const obj = item as Record<string, unknown>;
+      const chave = extractChave(obj, tipo);
+      if (!chave) return null;
+      return {
+        chave,
+        fluxo,
+        numero:      typeof obj['nnfs'] === 'string' ? obj['nnfs']
+                   : typeof obj['numero'] === 'string' ? obj['numero'] : undefined,
+        dataEmissao: typeof obj['dEmi'] === 'string' ? obj['dEmi']
+                   : typeof obj['dataEmissao'] === 'string' ? obj['dataEmissao'] : undefined,
+        cancelada:   Boolean(obj['cancelada'] ?? obj['situacao'] === 'cancelada'),
+        ...obj,
+      } as QyonDocItem;
+    })
+    .filter((item): item is QyonDocItem => item !== null);
 }
 
 export class QyonClient {
+  // Lista NFS-e/NF-e/etc. capturando Entrada (1) + Saída (2)
   async listDocuments(
     tipo: TipoDoc,
     accessKey: string,
-    dataInicio: string,
+    dataInicio: string,  // aceita YYYY-MM-DD ou yyyyMMdd
     dataFim: string
   ): Promise<QyonDocItem[]> {
-    const params = new URLSearchParams({ dataInicio, dataFim });
-    const url = `${QYON_BASE_URL}/v2/${tipo}/list?${params}`;
+    const startDate = toQyonDate(dataInicio);
+    const endDate   = toQyonDate(dataFim);
 
-    const { body, status } = await httpGetWithRetry(url, authHeaders(accessKey));
+    const hasTypeParam = !!TYPE_PARAM[tipo];
+    if (!hasTypeParam) {
+      // CT-e sem direção (param opcional)
+      return listarDirecao(tipo, accessKey, startDate, endDate, 2);
+    }
 
-    if (status === 401) throw new Error('accessKey inválida ou expirada (401)');
-    if (status === 404) return []; // sem documentos para o período
-    if (status >= 400) throw new Error(`Qyon retornou HTTP ${status} ao listar ${tipo}`);
+    // Para tipos com direção: captura Saída (2) e Entrada (1)
+    const [saida, entrada] = await Promise.all([
+      listarDirecao(tipo, accessKey, startDate, endDate, 2),
+      listarDirecao(tipo, accessKey, startDate, endDate, 1),
+    ]);
 
-    const response = JSON.parse(body) as QyonListResponse;
-    const rawItems = extractItems(response);
-
-    return rawItems
-      .map((item) => {
-        const obj = item as Record<string, unknown>;
-        const chave = extractChave(obj);
-        if (!chave) return null;
-
-        return {
-          chave,
-          numero: typeof obj['numero'] === 'string' ? obj['numero'] : undefined,
-          dataEmissao: typeof obj['dataEmissao'] === 'string' ? obj['dataEmissao'] : undefined,
-          cancelada: Boolean(obj['cancelada'] ?? obj['situacao'] === 'cancelada'),
-          ...obj,
-        } as QyonDocItem;
-      })
-      .filter((item): item is QyonDocItem => item !== null);
+    // Deduplicar por chave (mesmo doc pode aparecer nas 2 direções raramente)
+    const vistas = new Set<string>();
+    const result: QyonDocItem[] = [];
+    for (const item of [...saida, ...entrada]) {
+      if (!vistas.has(item.chave)) {
+        vistas.add(item.chave);
+        result.push(item);
+      }
+    }
+    return result;
   }
 
   async downloadXml(
@@ -139,12 +262,21 @@ export class QyonClient {
     chave: string,
     accessKey: string
   ): Promise<string> {
-    const url = `${QYON_BASE_URL}/v2/download/${tipo}/${encodeURIComponent(chave)}/xml`;
-    const { body, status } = await httpGetWithRetry(url, authHeaders(accessKey));
+    const params = new URLSearchParams({ accessKey });
+    const url = `${QYON_BASE_URL}/v2/download/${tipo}/${encodeURIComponent(chave)}/xml?${params}`;
 
-    if (status === 401) throw new Error('accessKey inválida ou expirada (401)');
-    if (status === 404) throw new Error(`XML não encontrado para chave ${chave}`);
-    if (status >= 400) throw new Error(`Qyon retornou HTTP ${status} ao baixar ${tipo}/${chave}`);
+    let { body, status } = await httpGetWithRetry(url, getAuthHeader());
+
+    if (status === 401) {
+      await refreshJwt();
+      const retry = await httpGetWithRetry(url, getAuthHeader());
+      body   = retry.body;
+      status = retry.status;
+    }
+
+    if (status === 401) throw new Error(`Credencial Qyon inválida (401) após refresh`);
+    if (status === 404) throw new Error(`XML não encontrado para chave ${chave} (${tipo})`);
+    if (status >= 400)  throw new Error(`Qyon retornou HTTP ${status} ao baixar ${tipo}/${chave}`);
 
     return body;
   }
