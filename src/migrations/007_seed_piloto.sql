@@ -35,7 +35,7 @@ INSERT INTO empresas (
   '16622353000163',
   'L. de Santana Santos Condicionadores de AR',
   'simples', true,
-  'de7ab5822f7c4c2f949c9e7d9b1b3c4a',  -- confirmar accessKey no empresas.json
+  'de7ab58211f364b173cbe4458d3fdeeb',
   'III',
   NULL, NULL, NULL, NULL, NULL,
   'cumulativo', NULL,
@@ -49,7 +49,7 @@ INSERT INTO empresas (
   '53821590000260',
   'Doctor Medical RD Ltda',
   'presumido', true,
-  'c52712165d9e4f3b8a1c7e2d6f0a9b4c',  -- confirmar accessKey no empresas.json
+  'c52712165996a3f22969f0315eefc3ea',
   NULL,
   0.32, 0.08, 0.08,   -- presunção serviços/comércio/indústria (padrão)
   0.08, 0.12,         -- base hospitalar: IRPJ 8%, CSLL 12%
