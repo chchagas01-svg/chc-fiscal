@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import cors from 'cors';
 import { bearerAuth } from './middleware/auth';
 import capturaRouter from './routes/captura';
 import relatorioRouter from './routes/relatorio';
@@ -10,6 +11,7 @@ import contabilRouter from './routes/contabil';
 const app = express();
 const PORT = process.env.PORT ?? 3000;
 
+app.use(cors());
 app.use(express.json());
 
 // Health check — sem autenticação
