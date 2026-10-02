@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHC-Fiscal</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #F4F5FB; --surface: #fff; --surface-2: #ECEEF8;
+  --fg: #1A1D30; --fg-2: #606480; --accent: #3549D6; --accent-s: #E5E8FF;
+  --ok: #15803D; --ok-s: #DCFCE7; --warn: #92400E; --warn-s: #FEF3C7;
+  --err: #B91C1C; --err-s: #FEE2E2; --border: #DDE0F0; --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+    --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+    --ok: #22C55E; --ok-s: #052E14; --warn: #F59E0B; --warn-s: #1C1102;
+    --err: #F87171; --err-s: #2C0808; --border: #24284A;
+  }
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+body {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  background: var(--bg); color: var(--fg);
+  font-size: 14px; line-height: 1.5; min-height: 100%;
+}
+
+/* Login */
+#login-screen {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; padding: 20px;
+}
+.login-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 36px 32px; width: 100%; max-width: 380px;
+}
+.login-logo { color: var(--accent); font-weight: 600; font-size: 16px; margin-bottom: 24px; }
+.login-logo span { font-size: 18px; margin-right: 7px; }
+.login-title { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+.login-sub { font-size: 13px; color: var(--fg-2); margin-bottom: 24px; }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.field label { font-size: 12px; font-weight: 500; color: var(--fg-2); text-transform: uppercase; letter-spacing: .05em; }
+.field input {
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface-2); color: var(--fg); width: 100%;
+}
+.field input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.btn-login {
+  width: 100%; padding: 10px; border: none; border-radius: 8px;
+  background: var(--accent); color: #fff; font-family: inherit;
+  font-size: 14px; font-weight: 500; cursor: pointer; margin-top: 4px;
+}
+.btn-login:hover { opacity: .88; }
+
+/* App */
+#app { display: none; }
+
+/* Header */
+.header {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100;
+}
+.header-inner {
+  max-width: 1020px; margin: 0 auto; padding: 12px 20px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 15px; color: var(--accent); }
+.brand-mark { font-size: 17px; }
+.hdr-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.comp-field { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-2); }
+.comp-field input[type="month"] {
+  font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+  padding: 5px 9px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface-2); color: var(--fg); cursor: pointer;
+}
+.comp-field input[type="month"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: 7px; font-family: inherit;
+  font-size: 13px; font-weight: 500; border: 1px solid transparent;
+  cursor: pointer; white-space: nowrap; line-height: 1; transition: opacity .13s;
+}
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover:not(:disabled) { opacity: .87; }
+.btn-ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-2); }
+.btn-logout { font-size: 12px; color: var(--fg-2); background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 5px; }
+.btn-logout:hover { background: var(--surface-2); }
+.spin {
+  width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.35);
+  border-top-color: #fff; border-radius: 50%;
+  animation: rot .55s linear infinite; display: none;
+}
+.spin.dark { border-color: rgba(0,0,0,.12); border-top-color: var(--fg); }
+.loading .spin { display: block; }
+@keyframes rot { to { transform: rotate(360deg); } }
+
+/* Main */
+.main { max-width: 1020px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 22px; }
+
+/* Tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 14px 16px; }
+.tile-lbl { font-size: 10.5px; color: var(--fg-2); text-transform: uppercase; letter-spacing: .06em; font-weight: 500; }
+.tile-val { font-size: 26px; font-weight: 600; margin-top: 3px; font-variant-numeric: tabular-nums; line-height: 1; }
+.c-ok { color: var(--ok); } .c-err { color: var(--err); } .c-acc { color: var(--accent); }
+
+/* Section */
+.sec-hdr {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--fg-2); padding-bottom: 10px; border-bottom: 1px solid var(--border); margin-bottom: 12px;
+}
+
+/* Cards */
+.cards { display: flex; flex-direction: column; gap: 10px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 16px; }
+.card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.card-name { font-weight: 600; font-size: 14px; }
+.card-cnpj { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--fg-2); margin-top: 2px; }
+.regime-pill {
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  padding: 2px 8px; border-radius: 100px; background: var(--accent-s); color: var(--accent); white-space: nowrap; flex-shrink: 0;
+}
+.stages { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 12px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px;
+  padding: 4px 10px; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--fg-2);
+}
+.chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-2); flex-shrink: 0; }
+.chip.s-ok { background: var(--ok-s); border-color: transparent; color: var(--ok); }
+.chip.s-ok .dot { background: var(--ok); }
+.chip.s-erro { background: var(--err-s); border-color: transparent; color: var(--err); }
+.chip.s-erro .dot { background: var(--err); }
+.chip.s-sem_movimento { background: var(--warn-s); color: var(--warn); border-color: transparent; }
+.chip.s-sem_movimento .dot { background: var(--warn); }
+.ap-grid {
+  display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px;
+  padding: 12px 14px; background: var(--surface-2); border-radius: 8px;
+}
+.ap-item { display: flex; flex-direction: column; gap: 2px; }
+.ap-lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-2); font-weight: 500; }
+.ap-val { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--accent); }
+.card-note { font-size: 11px; color: var(--fg-2); margin-top: 8px; padding: 7px 10px; background: var(--surface-2); border-radius: 6px; word-break: break-word; }
+
+/* Log */
+.log-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); max-height: 220px; overflow-y: auto; }
+.log-row { display: flex; gap: 10px; padding: 7px 14px; border-bottom: 1px solid var(--border); align-items: baseline; }
+.log-row:last-child { border-bottom: none; }
+.log-ts { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--fg-2); flex-shrink: 0; }
+.log-msg { font-size: 12px; min-width: 0; word-break: break-word; }
+.log-msg.t-ok { color: var(--ok); } .log-msg.t-err { color: var(--err); } .log-msg.t-info { color: var(--accent); }
+.log-empty { padding: 16px 14px; font-size: 12px; color: var(--fg-2); }
+
+/* Skeleton */
+.sk { background: var(--surface-2); border-radius: 6px; animation: pulse 1s ease-in-out infinite alternate; }
+@keyframes pulse { to { opacity: .3; } }
+
+/* Toast */
+#toast {
+  position: fixed; bottom: 20px; right: 20px; z-index: 999;
+  padding: 9px 15px; border-radius: 9px; font-size: 13px; font-weight: 500;
+  opacity: 0; transform: translateY(5px); transition: all .2s;
+  pointer-events: none; max-width: 280px;
+}
+#toast.show { opacity: 1; transform: none; }
+#toast.t-ok { background: var(--ok); color: #fff; }
+#toast.t-err { background: var(--err); color: #fff; }
+
+@media (max-width: 500px) {
+  .header-inner { gap: 8px; } .hdr-right { gap: 6px; }
+  .btn { padding: 7px 10px; font-size: 12px; }
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo"><span>◆</span>CHC-Fiscal</div>
+    <div class="login-title">Entrar</div>
+    <div class="login-sub">Escritório Carlos Chagas — Motor Fiscal</div>
+    <div class="field">
+      <label>Chave de API</label>
+      <input type="password" id="api-key-input" placeholder="Bearer ..." autocomplete="current-password">
+    </div>
+    <button class="btn-login" id="btn-login">Entrar</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <div id="toast"></div>
+  <header class="header">
+    <div class="header-inner">
+      <div class="brand"><span class="brand-mark">◆</span>CHC-Fiscal</div>
+      <div class="hdr-right">
+        <div class="comp-field">
+          <label for="comp">Competência</label>
+          <input type="month" id="comp">
+        </div>
+        <button class="btn btn-ghost" id="btn-capturar">
+          <span class="spin dark"></span><span>Capturar Notas</span>
+        </button>
+        <button class="btn btn-primary" id="btn-apurar">
+          <span class="spin"></span><span>Executar Apuração</span>
+        </button>
+        <button class="btn btn-ghost" id="btn-reload" title="Atualizar">↻</button>
+        <button class="btn-logout" id="btn-logout">Sair</button>
+      </div>
+    </div>
+  </header>
+  <main class="main">
+    <div id="tiles" class="tiles"></div>
+    <div>
+      <div class="sec-hdr">Empresas</div>
+      <div id="cards" class="cards"></div>
+    </div>
+    <div>
+      <div class="sec-hdr">Atividade</div>
+      <div class="log-box" id="log"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  // ── Auth ──────────────────────────────────────────
+  let apiKey = '';
+  try { apiKey = localStorage.getItem('chc_api_key') || ''; } catch(e) {}
+
+  function login(key) {
+    apiKey = key.trim();
+    try { localStorage.setItem('chc_api_key', apiKey); } catch(e) {}
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    initComp();
+    loadStatus();
+  }
+
+  function logout() {
+    try { localStorage.removeItem('chc_api_key'); } catch(e) {}
+    apiKey = '';
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('api-key-input').value = '';
+  }
+
+  document.getElementById('btn-login').addEventListener('click', () => {
+    const k = document.getElementById('api-key-input').value;
+    if (k.trim()) login(k); else document.getElementById('api-key-input').focus();
+  });
+  document.getElementById('api-key-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('btn-login').click();
+  });
+  document.getElementById('btn-logout').addEventListener('click', logout);
+
+  if (apiKey) login(apiKey);
+
+  // ── Competência ───────────────────────────────────
+  function initComp() {
+    const now = new Date();
+    // Competência = mês anterior ao atual
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    document.getElementById('comp').value = val;
+  }
+  function getComp() { return document.getElementById('comp').value; }
+
+  // ── Utilitários ──────────────────────────────────
+  function h(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function ts()  { return new Date().toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit' }); }
+  function brl(v) {
+    if (v == null || v === 0) return '—';
+    return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits:2, maximumFractionDigits:2 });
+  }
+  function fmtCnpj(s) {
+    s = s.replace(/\D/g,'');
+    return s.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  }
+  function statusLbl(s) {
+    return ({ok:'Concluído', erro:'Erro', pendente:'Pendente', sem_movimento:'Sem movimento', retida:'Retida'})[s] || s;
+  }
+
+  // ── Log ──────────────────────────────────────────
+  let logs = [];
+  function addLog(msg, type = 'info') {
+    logs.unshift({ ts: ts(), msg, type });
+    if (logs.length > 60) logs.length = 60;
+    renderLog();
+  }
+  function renderLog() {
+    const el = document.getElementById('log');
+    if (!logs.length) { el.innerHTML = '<div class="log-empty">Nenhuma atividade ainda.</div>'; return; }
+    el.innerHTML = logs.map(l =>
+      `<div class="log-row"><span class="log-ts">${l.ts}</span><span class="log-msg t-${l.type}">${h(l.msg)}</span></div>`
+    ).join('');
+  }
+
+  // ── Toast ─────────────────────────────────────────
+  function toast(msg, type = 'ok') {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = `show t-${type}`;
+    clearTimeout(t._t);
+    t._t = setTimeout(() => { t.className = ''; }, 3200);
+  }
+
+  // ── Render ────────────────────────────────────────
+  function headers() {
+    return { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+  }
+
+  function renderTiles(r, fase2) {
+    document.getElementById('tiles').innerHTML = `
+      <div class="tile"><div class="tile-lbl">Empresas</div><div class="tile-val c-acc">${r.total}</div></div>
+      <div class="tile"><div class="tile-lbl">Captura OK</div>
+        <div class="tile-val ${r.captura_ok === r.total ? 'c-ok' : ''}">${r.captura_ok}/${r.total}</div></div>
+      <div class="tile"><div class="tile-lbl">Apuração OK</div>
+        <div class="tile-val ${r.apuracao_ok === r.total ? 'c-ok' : ''}">${r.apuracao_ok}/${r.total}</div></div>
+      <div class="tile"><div class="tile-lbl">Fase 2</div>
+        <div class="tile-val ${fase2 ? 'c-ok' : ''}" style="font-size:16px;margin-top:7px">${fase2 ? 'Liberada' : 'Pendente'}</div></div>
+    `;
+  }
+
+  function renderCards(empresas) {
+    const el = document.getElementById('cards');
+    if (!empresas?.length) { el.innerHTML = '<div style="color:var(--fg-2);font-size:13px">Nenhuma empresa.</div>'; return; }
+    el.innerHTML = empresas.map(e => {
+      const et = e.etapas || {};
+      const cap = et.captura, apu = et.apuracao;
+      const rl = e.regime === 'simples' ? 'Simples Nacional' : e.regime === 'presumido' ? 'Lucro Presumido' : e.regime;
+      const chip = (lbl, stage) => {
+        const cls = stage ? `s-${stage.status}` : 's-pendente';
+        return `<span class="chip ${cls}"><span class="dot"></span>${lbl}: ${stage ? statusLbl(stage.status) : 'Pendente'}</span>`;
+      };
+      const ap = e.apuracao;
+      const apHtml = ap ? (() => {
+        const fields = [
+          ['DAS', ap.das_devido], ['PIS', ap.pis_devido], ['COFINS', ap.cofins_devida],
+          ['ISS', ap.iss_devido], ['ICMS', ap.icms_devido], ['IRPJ', ap.irpj_devido], ['CSLL', ap.csll_devida]
+        ].filter(([,v]) => v != null && v !== 0);
+        return fields.length ? `<div class="ap-grid">${fields.map(([l,v]) =>
+          `<div class="ap-item"><div class="ap-lbl">${l}</div><div class="ap-val">${brl(v)}</div></div>`
+        ).join('')}</div>` : '';
+      })() : '';
+      const note = cap?.detalhe ? `<div class="card-note">${h(cap.detalhe)}</div>` : '';
+      return `<div class="card">
+        <div class="card-top">
+          <div><div class="card-name">${h(e.nome)}</div><div class="card-cnpj">${fmtCnpj(e.cnpj)}</div></div>
+          <span class="regime-pill">${rl}</span>
+        </div>
+        <div class="stages">${chip('Captura', cap)}${chip('Apuração', apu)}</div>
+        ${apHtml}${note}
+      </div>`;
+    }).join('');
+  }
+
+  function renderSkeleton() {
+    document.getElementById('tiles').innerHTML = [1,2,3,4].map(() =>
+      `<div class="tile"><div class="sk" style="height:12px;width:70px;margin-bottom:10px"></div><div class="sk" style="height:30px;width:50px"></div></div>`
+    ).join('');
+    document.getElementById('cards').innerHTML = [1,2,3].map(() =>
+      `<div class="card"><div class="sk" style="height:16px;width:260px;margin-bottom:8px"></div><div class="sk" style="height:12px;width:160px"></div></div>`
+    ).join('');
+  }
+
+  // ── API ──────────────────────────────────────────
+  async function loadStatus() {
+    const comp = getComp(); if (!comp) return;
+    renderSkeleton();
+    addLog(`Consultando fechamento ${comp}…`, 'info');
+    try {
+      const r = await fetch(`/v1/fechamento/status/${comp}`, { headers: headers() });
+      if (r.status === 401 || r.status === 403) { logout(); return; }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      renderTiles(d.resumo, d.fase2_liberada);
+      renderCards(d.empresas);
+      addLog(`Status carregado — ${d.resumo.captura_ok}/${d.resumo.total} captura OK, ${d.resumo.apuracao_ok}/${d.resumo.total} apuração OK`, 'ok');
+    } catch(e) {
+      document.getElementById('tiles').innerHTML = '';
+      document.getElementById('cards').innerHTML =
+        `<div style="background:var(--err-s);color:var(--err);padding:14px;border-radius:8px;font-size:13px">
+          <strong>Erro:</strong> ${h(e.message)}
+        </div>`;
+      addLog(`Erro: ${e.message}`, 'err');
+    }
+  }
+
+  function setBtn(id, busy) {
+    const b = document.getElementById(id);
+    b.classList.toggle('loading', busy); b.disabled = busy;
+  }
+
+  async function capturar() {
+    setBtn('btn-capturar', true);
+    const comp = getComp();
+    addLog(`Captura iniciada — ${comp}…`, 'info');
+    try {
+      const r = await fetch('/v1/captura/importar', {
+        method: 'POST', headers: headers(), body: JSON.stringify({ competencia: comp })
+      });
+      if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.erro || `HTTP ${r.status}`); }
+      const d = await r.json();
+      const n = d.resumo?.total_notas_importadas ?? 0;
+      const err = d.resumo?.com_erro ?? 0;
+      const msg = `Captura concluída: ${n} nota(s) importada(s)${err ? `, ${err} com erro` : ''}`;
+      addLog(msg, err ? 'err' : 'ok'); toast(msg, err ? 'err' : 'ok');
+      await loadStatus();
+    } catch(e) {
+      addLog(`Erro na captura: ${e.message}`, 'err'); toast('Erro na captura', 'err');
+    } finally { setBtn('btn-capturar', false); }
+  }
+
+  async function apurar() {
+    setBtn('btn-apurar', true);
+    const comp = getComp();
+    addLog(`Apuração iniciada — ${comp}…`, 'info');
+    try {
+      const r = await fetch('/v1/apuracao/executar', {
+        method: 'POST', headers: headers(), body: JSON.stringify({ competencia: comp })
+      });
+      if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.erro || `HTTP ${r.status}`); }
+      addLog('Apuração fiscal concluída', 'ok'); toast('Apuração concluída', 'ok');
+      await loadStatus();
+    } catch(e) {
+      addLog(`Erro na apuração: ${e.message}`, 'err'); toast('Erro na apuração', 'err');
+    } finally { setBtn('btn-apurar', false); }
+  }
+
+  // ── Eventos ──────────────────────────────────────
+  document.getElementById('btn-reload').addEventListener('click', loadStatus);
+  document.getElementById('btn-capturar').addEventListener('click', capturar);
+  document.getElementById('btn-apurar').addEventListener('click', apurar);
+  document.getElementById('comp').addEventListener('change', loadStatus);
+
+  renderLog();
+})();
+</script>
+</body>
+</html>
