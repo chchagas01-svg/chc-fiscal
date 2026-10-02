@@ -12,4 +12,4 @@ COPY package*.json ./
 RUN npm install --omit=dev --ignore-scripts
 COPY --from=builder /app/dist ./dist
 EXPOSE 3000
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "node dist/migrations/run.js && node dist/index.js"]
