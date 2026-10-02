@@ -39,9 +39,13 @@ export interface QyonDocItem {
 interface QyonListResponse {
   success: boolean;
   totalSize?: number;
+  pageSize?: number;
+  currentPage?: number;
   list?: unknown[];
   [key: string]: unknown;
 }
+
+const PAGE_SIZE = 50;
 
 // In-memory JWT — initialised from env, refreshed automatically on 401
 let currentJwt: string = process.env['QYON_JWT'] ?? '';
@@ -168,41 +172,7 @@ async function httpGetWithRetry(
   throw lastError;
 }
 
-// Chama a listagem para uma direção (1 ou 2) e retorna os itens
-async function listarDirecao(
-  tipo: TipoDoc,
-  accessKey: string,
-  startDate: string,
-  endDate: string,
-  fluxo: 1 | 2
-): Promise<QyonDocItem[]> {
-  const typeParam = TYPE_PARAM[tipo];
-  const params = new URLSearchParams({
-    accessKey,
-    startDate,
-    endDate,
-    ...(typeParam ? { [typeParam]: String(fluxo) } : {}),
-  });
-  const url = `${QYON_BASE_URL}/v2/${tipo}/list?${params}`;
-
-  let { body, status } = await httpGetWithRetry(url, getAuthHeader());
-
-  // JWT expirado → tentar renovar e repetir uma vez
-  if (status === 401) {
-    await refreshJwt();
-    const retry = await httpGetWithRetry(url, getAuthHeader());
-    body   = retry.body;
-    status = retry.status;
-  }
-
-  if (status === 401) throw new Error(`Credencial Qyon inválida (401) após refresh`);
-  if (status === 404) return [];
-  if (status >= 400)  throw new Error(`Qyon retornou HTTP ${status} ao listar ${tipo}`);
-
-  const response = JSON.parse(body) as QyonListResponse;
-  if (!response.success) return [];
-  const rawItems = response.list ?? [];
-
+function mapItems(rawItems: unknown[], tipo: TipoDoc, fluxo: 1 | 2): QyonDocItem[] {
   return rawItems
     .map((item) => {
       const obj = item as Record<string, unknown>;
@@ -220,6 +190,67 @@ async function listarDirecao(
       } as QyonDocItem;
     })
     .filter((item): item is QyonDocItem => item !== null);
+}
+
+async function listarPagina(
+  tipo: TipoDoc,
+  accessKey: string,
+  startDate: string,
+  endDate: string,
+  fluxo: 1 | 2,
+  page: number
+): Promise<QyonListResponse> {
+  const typeParam = TYPE_PARAM[tipo];
+  const params = new URLSearchParams({
+    accessKey,
+    startDate,
+    endDate,
+    page:     String(page),
+    pageSize: String(PAGE_SIZE),
+    ...(typeParam ? { [typeParam]: String(fluxo) } : {}),
+  });
+  const url = `${QYON_BASE_URL}/v2/${tipo}/list?${params}`;
+
+  let { body, status } = await httpGetWithRetry(url, getAuthHeader());
+
+  if (status === 401) {
+    await refreshJwt();
+    const retry = await httpGetWithRetry(url, getAuthHeader());
+    body   = retry.body;
+    status = retry.status;
+  }
+
+  if (status === 401) throw new Error(`Credencial Qyon inválida (401) após refresh`);
+  if (status === 404) return { success: true, list: [] };
+  if (status >= 400)  throw new Error(`Qyon retornou HTTP ${status} ao listar ${tipo}`);
+
+  return JSON.parse(body) as QyonListResponse;
+}
+
+// Chama a listagem para uma direção (1 ou 2) e retorna todos os itens (com paginação)
+async function listarDirecao(
+  tipo: TipoDoc,
+  accessKey: string,
+  startDate: string,
+  endDate: string,
+  fluxo: 1 | 2
+): Promise<QyonDocItem[]> {
+  const allItems: QyonDocItem[] = [];
+  let page = 0;
+
+  while (true) {
+    const response = await listarPagina(tipo, accessKey, startDate, endDate, fluxo, page);
+    if (!response.success) break;
+
+    const rawItems = response.list ?? [];
+    allItems.push(...mapItems(rawItems, tipo, fluxo));
+
+    const totalSize = response.totalSize ?? rawItems.length;
+    if (allItems.length >= totalSize || rawItems.length < PAGE_SIZE) break;
+    page++;
+  }
+
+  return allItems;
 }
 
 export class QyonClient {

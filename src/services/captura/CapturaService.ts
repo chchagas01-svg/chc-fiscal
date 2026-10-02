@@ -124,20 +124,27 @@ async function capturarEmpresa(
       resultado.tipos_processados.push(tipo);
 
       for (const item of items) {
-        // Download do XML
-        const xml = await qyonClient.downloadXml(tipo, item.chave, empresa.qyon_access_key);
+        try {
+          // Download do XML
+          const xml = await qyonClient.downloadXml(tipo, item.chave, empresa.qyon_access_key);
 
-        // Parse
-        const notas = await parseXml(xml);
+          // Parse
+          const notas = await parseXml(xml);
 
-        // Inserção — ON CONFLICT DO NOTHING garante idempotência
-        for (const nota of notas) {
-          const inserida = await inserirNota(empresa.id, competencia, nota);
-          if (inserida) {
-            resultado.notas_importadas++;
-          } else {
-            resultado.notas_ignoradas_duplicatas++;
+          // Inserção — ON CONFLICT DO NOTHING garante idempotência
+          for (const nota of notas) {
+            const inserida = await inserirNota(empresa.id, competencia, nota);
+            if (inserida) {
+              resultado.notas_importadas++;
+            } else {
+              resultado.notas_ignoradas_duplicatas++;
+            }
           }
+        } catch (itemErr) {
+          // Isola falha de 1 documento para não travar os demais
+          const msg = itemErr instanceof Error ? itemErr.message : String(itemErr);
+          resultado.erros.push(`${tipo}[${item.chave.substring(0, 8)}]: ${msg}`);
+          await registrarAudit(competencia, empresa.id, `captura_item_erro`, { tipo, chave: item.chave }, msg);
         }
       }
     } catch (err) {
