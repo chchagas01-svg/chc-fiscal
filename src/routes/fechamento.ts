@@ -80,7 +80,7 @@ router.get('/status/:competencia', async (req: Request, res: Response) => {
            'status', fe.status,
            'detalhe', fe.detalhe,
            'atualizado_em', fe.atualizado_em
-         )) AS etapas
+         )) FILTER (WHERE fe.etapa IS NOT NULL) AS etapas
        FROM empresas e
        LEFT JOIN fechamentos_estado fe
          ON fe.empresa_id = e.id AND fe.competencia = $1
