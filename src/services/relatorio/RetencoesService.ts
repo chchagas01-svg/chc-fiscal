@@ -38,13 +38,14 @@ interface NotaRow {
   id: number; numero: string; data_emissao: Date; cnpj_emitente: string; nome_emitente: string | null;
   valor_bruto: string; valor_liquido: string;
   ret_irrf: string; ret_pis: string; ret_cofins: string; ret_csll: string; ret_inss: string;
+  retencao_manual: boolean;
   xml_raw: string | null;
 }
 
 export async function relatorioRetencoes(empresaId: number, competencia: string) {
   const res = await query<NotaRow>(
     `SELECT id, numero, data_emissao, cnpj_emitente, nome_emitente, valor_bruto, valor_liquido,
-            ret_irrf, ret_pis, ret_cofins, ret_csll, ret_inss, xml_raw
+            ret_irrf, ret_pis, ret_cofins, ret_csll, ret_inss, retencao_manual, xml_raw
        FROM notas
       WHERE empresa_id = $1 AND competencia = $2 AND natureza = 'servico_tomado' AND cancelada = false
       ORDER BY nome_emitente, data_emissao, id`,
@@ -60,15 +61,18 @@ export async function relatorioRetencoes(empresaId: number, competencia: string)
     const regime = regimePrestador(xml);
 
     const alertas: string[] = [];
-    if (regime === 'nao_optante') {
+    // Retenção já conferida e ajustada no painel: alertas do XML não se aplicam
+    if (!n.retencao_manual && regime === 'nao_optante') {
       if (irrf === 0 && csrf === 0)
         alertas.push(`Prestador não optante sem retenção destacada — se o serviço for sujeito: IRRF ${fmt(bruto * ALIQ_IRRF)} / CSRF ${fmt(bruto * ALIQ_CSRF)}`);
       else if (csll > 0 && pis + cofins === 0 && pisCofinsDestacados(xml) > 0)
         alertas.push(`PIS/COFINS destacados (${fmt(pisCofinsDestacados(xml))}) mas não descontados do líquido — CSRF integral seria ${fmt(bruto * ALIQ_CSRF)}`);
     }
-    if (regime === 'desconhecido') alertas.push('Regime do prestador não informado no XML');
-    if (irrf > 0 && irrf <= LIMITE_DISPENSA) alertas.push('IRRF ≤ R$ 10,00 — retenção dispensada');
-    if (csrf > 0 && csrf <= LIMITE_DISPENSA) alertas.push('CSRF ≤ R$ 10,00 — retenção dispensada');
+    if (!n.retencao_manual) {
+      if (regime === 'desconhecido') alertas.push('Regime do prestador não informado no XML');
+      if (irrf > 0 && irrf <= LIMITE_DISPENSA) alertas.push('IRRF ≤ R$ 10,00 — retenção dispensada');
+      if (csrf > 0 && csrf <= LIMITE_DISPENSA) alertas.push('CSRF ≤ R$ 10,00 — retenção dispensada');
+    }
 
     return {
       id: n.id, numero: n.numero, data_emissao: n.data_emissao,
@@ -76,6 +80,7 @@ export async function relatorioRetencoes(empresaId: number, competencia: string)
       regime, codigo_servico: codigoServico(xml),
       valor_bruto: bruto, valor_liquido: parseFloat(n.valor_liquido),
       irrf_1708: irrf, pis, cofins, csll, csrf_5952: csrf, inss_r2010: inss,
+      retencao_manual: n.retencao_manual,
       alertas,
     };
   });

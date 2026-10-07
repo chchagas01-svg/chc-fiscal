@@ -176,7 +176,7 @@ router.get('/', async (req, res) => {
 router.post('/reprocessar-retencoes', async (req, res) => {
   const { empresa_id, competencia, natureza, aplicar } =
     req.body as { empresa_id?: number; competencia?: string; natureza?: string; aplicar?: boolean };
-  const conds = [`n.xml_raw IS NOT NULL`, `n.tipo_doc = 'nfse'`];
+  const conds = [`n.xml_raw IS NOT NULL`, `n.tipo_doc = 'nfse'`, `NOT n.retencao_manual`];
   const params: unknown[] = [];
   if (empresa_id)  { params.push(Number(empresa_id)); conds.push(`n.empresa_id = $${params.length}`); }
   if (competencia) { params.push(String(competencia)); conds.push(`n.competencia = $${params.length}`); }
@@ -242,8 +242,12 @@ router.patch('/:id', async (req, res) => {
     'valor_bruto', 'valor_deducoes', 'valor_liquido',
     'iss_retido', 'valor_iss',
     'ret_pis', 'ret_cofins', 'ret_csll', 'ret_irrf', 'ret_inss',
-    'icms_debito', 'icms_credito', 'cancelada', 'cfop', 'competencia',
+    'icms_debito', 'icms_credito', 'cancelada', 'cfop', 'competencia', 'retencao_manual',
   ] as const;
+
+  // Retenção editada à mão fica protegida do reprocessamento do XML (a menos que venha retencao_manual=false)
+  const camposRet = ['ret_pis', 'ret_cofins', 'ret_csll', 'ret_irrf', 'ret_inss'];
+  if (camposRet.some(k => k in req.body) && !('retencao_manual' in req.body)) req.body.retencao_manual = true;
 
   if ('competencia' in req.body && !/^\d{4}-\d{2}$/.test(String(req.body.competencia)))
     return res.status(400).json({ erro: 'competencia deve estar no formato YYYY-MM' });

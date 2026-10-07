@@ -376,6 +376,27 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
     </div>
   </div>
 
+  <!-- MODAL RETENÇÕES -->
+  <div id="modal-ret" class="modal-bg" style="display:none">
+    <div class="modal-box" style="max-width:520px">
+      <div class="modal-title" id="modal-ret-titulo">Retenções</div>
+      <div class="modal-grid">
+        <div class="field"><label>IRRF — 1708 (R$)</label><input type="number" id="mr-irrf" step="0.01" min="0"></div>
+        <div class="field"><label>INSS retido — R-2010 (R$)</label><input type="number" id="mr-inss" step="0.01" min="0"></div>
+        <div class="field"><label>PIS (R$)</label><input type="number" id="mr-pis" step="0.01" min="0"></div>
+        <div class="field"><label>COFINS (R$)</label><input type="number" id="mr-cofins" step="0.01" min="0"></div>
+        <div class="field"><label>CSLL (R$)</label><input type="number" id="mr-csll" step="0.01" min="0"></div>
+        <div class="field"><label>CSRF — 5952 (R$)</label><input type="text" id="mr-csrf" disabled></div>
+      </div>
+      <p style="font-size:12px;color:var(--fg-2);margin-top:8px">Valores salvos aqui ficam marcados como conferidos e não são sobrescritos ao reprocessar o XML. "Voltar ao XML" desfaz o ajuste.</p>
+      <div class="modal-actions">
+        <button class="btn-m btn-m-ghost" id="btn-mr-xml" style="margin-right:auto">Voltar ao XML</button>
+        <button class="btn-m btn-m-ghost" id="btn-mr-cancel">Cancelar</button>
+        <button class="btn-m btn-m-primary" id="btn-mr-save">Salvar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL CONFIRMAR EXCLUSÃO -->
   <div id="modal-del" class="modal-bg" style="display:none">
     <div class="modal-box" style="max-width:380px">
@@ -523,6 +544,7 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
               <th class="num">CSRF 5952</th>
               <th class="num">INSS</th>
               <th>Conferir</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="body-retencoes"></tbody>
@@ -798,7 +820,7 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
     const empresaId = document.getElementById('sel-empresa').value;
     const comp = document.getElementById('sel-comp').value;
     const tbody = document.getElementById('body-retencoes');
-    tbody.innerHTML = '<tr><td colspan="13">Carregando...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="14">Carregando...</td></tr>';
     try {
       const r = await fetch('/v1/relatorio/retencoes/' + comp + '?empresa_id=' + empresaId, { headers: headers() });
       const d = await r.json();
@@ -819,7 +841,10 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
         return pb - pa;
       });
       const v = function(n) { return n ? fmt(n) : '<span style="color:var(--fg-2)">—</span>'; };
+      _retNotas = {};
+      notas.forEach(function(n) { _retNotas[n.id] = n; });
       tbody.innerHTML = notas.map(function(n) {
+        const temRet = n.irrf_1708 + n.csrf_5952 + n.inss_r2010 > 0;
         return '<tr>' +
           '<td>' + esc(n.numero) + '</td>' +
           '<td>' + fmtData(n.data_emissao) + '</td>' +
@@ -833,9 +858,15 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
           '<td class="num">' + v(n.csll) + '</td>' +
           '<td class="num">' + v(n.csrf_5952) + '</td>' +
           '<td class="num">' + v(n.inss_r2010) + '</td>' +
-          '<td style="color:var(--warn);font-size:12px">' + n.alertas.map(esc).join('<br>') + '</td>' +
+          '<td style="color:var(--warn);font-size:12px">' +
+            (n.retencao_manual ? '<span class="badge badge-ok">conferido</span> ' : '') +
+            n.alertas.map(esc).join('<br>') + '</td>' +
+          '<td class="acoes">' +
+            '<button class="btn-act btn-act-edit" data-ret="editar" data-id="' + n.id + '">' + (temRet ? 'Editar' : 'Incluir') + '</button>' +
+            (temRet ? '<button class="btn-act btn-act-canc" data-ret="zerar" data-id="' + n.id + '">Excluir</button>' : '') +
+          '</td>' +
           '</tr>';
-      }).join('') || '<tr><td colspan="13">Nenhum serviço tomado nesta competência.</td></tr>';
+      }).join('') || '<tr><td colspan="14">Nenhum serviço tomado nesta competência.</td></tr>';
       document.getElementById('foot-retencoes').innerHTML =
         '<tr><td colspan="5"><strong>Total</strong></td>' +
         '<td class="num"><strong>' + fmt(t.valor_bruto) + '</strong></td>' +
@@ -844,11 +875,86 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
         '<td class="num">' + fmt(t.csrf_5952.cofins) + '</td>' +
         '<td class="num">' + fmt(t.csrf_5952.csll) + '</td>' +
         '<td class="num"><strong>' + fmt(t.csrf_5952.total) + '</strong></td>' +
-        '<td class="num"><strong>' + fmt(t.inss_r2010) + '</strong></td><td></td></tr>';
+        '<td class="num"><strong>' + fmt(t.inss_r2010) + '</strong></td><td></td><td></td></tr>';
     } catch (e) {
-      tbody.innerHTML = '<tr><td colspan="13">Erro: ' + esc(e.message) + '</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="14">Erro: ' + esc(e.message) + '</td></tr>';
     }
   }
+
+  // Incluir / alterar / excluir retenções de uma nota
+  let _retNotas = {};
+  let _retEditId = null;
+  const MR = ['irrf', 'pis', 'cofins', 'csll', 'inss'];
+
+  function atualizarCsrfModal() {
+    const s = ['pis', 'cofins', 'csll'].reduce(function(a, k) {
+      return a + (parseFloat(document.getElementById('mr-' + k).value) || 0);
+    }, 0);
+    document.getElementById('mr-csrf').value = fmt(s);
+  }
+  MR.forEach(function(k) { document.getElementById('mr-' + k).addEventListener('input', atualizarCsrfModal); });
+
+  async function salvarRetencao(id, body, msg) {
+    try {
+      const r = await fetch('/v1/notas/' + id, { method: 'PATCH', headers: headers(), body: JSON.stringify(body) });
+      const d = await r.json().catch(function() { return {}; });
+      if (!r.ok) throw new Error(d.erro || 'HTTP ' + r.status);
+      toast(msg, 'ok');
+      document.getElementById('modal-ret').style.display = 'none';
+      await carregarRetencoes();
+    } catch (e) { toast('Erro: ' + e.message, 'err'); }
+  }
+
+  document.getElementById('body-retencoes').addEventListener('click', function(e) {
+    const btn = e.target.closest('button[data-ret]');
+    if (!btn) return;
+    const n = _retNotas[btn.dataset.id];
+    if (!n) return;
+    if (btn.dataset.ret === 'zerar') {
+      if (!confirm('Excluir as retenções da NF ' + n.numero + ' (' + n.prestador + ')?')) return;
+      salvarRetencao(n.id, { ret_irrf: 0, ret_pis: 0, ret_cofins: 0, ret_csll: 0, ret_inss: 0 }, 'Retenções excluídas');
+      return;
+    }
+    _retEditId = n.id;
+    document.getElementById('modal-ret-titulo').textContent =
+      'Retenções — NF ' + n.numero + ' · ' + (n.prestador || '') + ' · ' + fmtR(n.valor_bruto);
+    document.getElementById('mr-irrf').value = n.irrf_1708 || '';
+    document.getElementById('mr-pis').value = n.pis || '';
+    document.getElementById('mr-cofins').value = n.cofins || '';
+    document.getElementById('mr-csll').value = n.csll || '';
+    document.getElementById('mr-inss').value = n.inss_r2010 || '';
+    atualizarCsrfModal();
+    document.getElementById('modal-ret').style.display = 'flex';
+  });
+  document.getElementById('btn-mr-cancel').addEventListener('click', function() {
+    document.getElementById('modal-ret').style.display = 'none';
+  });
+  document.getElementById('btn-mr-save').addEventListener('click', function() {
+    const val = function(k) { return Math.round((parseFloat(document.getElementById('mr-' + k).value) || 0) * 100) / 100; };
+    salvarRetencao(_retEditId, {
+      ret_irrf: val('irrf'), ret_pis: val('pis'), ret_cofins: val('cofins'), ret_csll: val('csll'), ret_inss: val('inss'),
+    }, 'Retenções salvas');
+  });
+  // Desfaz o ajuste manual: libera a nota e relê os valores do XML
+  document.getElementById('btn-mr-xml').addEventListener('click', async function() {
+    const n = _retNotas[_retEditId];
+    try {
+      const r1 = await fetch('/v1/notas/' + _retEditId, {
+        method: 'PATCH', headers: headers(), body: JSON.stringify({ retencao_manual: false })
+      });
+      if (!r1.ok) throw new Error('HTTP ' + r1.status);
+      const r2 = await fetch('/v1/notas/reprocessar-retencoes', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ empresa_id: Number(document.getElementById('sel-empresa').value),
+                               competencia: document.getElementById('sel-comp').value,
+                               natureza: 'servico_tomado', aplicar: true })
+      });
+      if (!r2.ok) throw new Error('HTTP ' + r2.status);
+      toast('NF ' + (n ? n.numero : '') + ' voltou aos valores do XML', 'ok');
+      document.getElementById('modal-ret').style.display = 'none';
+      await carregarRetencoes();
+    } catch (e) { toast('Erro: ' + e.message, 'err'); }
+  });
 
   // ── Formatters ─────────────────────────────────────
   function fmt(n) {
