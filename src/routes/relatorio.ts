@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { gerarRelatorioConferencia } from '../services/relatorio/RelatorioService';
+import { relatorioRetencoes } from '../services/relatorio/RetencoesService';
 
 const router = Router();
 
@@ -25,6 +26,22 @@ router.get('/conferencia/:competencia', async (req: Request, res: Response) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ erro: 'Falha ao gerar relatório', detalhe: msg });
+  }
+});
+
+// GET /v1/relatorio/retencoes/:competencia?empresa_id=X — retenções sobre serviços tomados (EFD-Reinf)
+router.get('/retencoes/:competencia', async (req: Request, res: Response) => {
+  const competencia = req.params['competencia'] as string;
+  const empresaId = Number(req.query['empresa_id']);
+  if (!/^\d{4}-\d{2}$/.test(competencia) || !empresaId) {
+    res.status(400).json({ erro: 'Informe competencia (YYYY-MM) e empresa_id' });
+    return;
+  }
+  try {
+    res.json(await relatorioRetencoes(empresaId, competencia));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ erro: 'Falha ao gerar relatório de retenções', detalhe: msg });
   }
 });
 

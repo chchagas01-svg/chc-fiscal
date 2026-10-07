@@ -73,43 +73,73 @@ function parseDfe3(inf: Record<string, unknown>, xml: string): ParsedNota {
   // ISS retention — tpRetISSQN: 1=não retido, 2=retido pelo tomador, 3=retido intermediário
   const trib     = (valoresDps['trib']    ?? {}) as Record<string, unknown>;
   const tribMun  = (trib['tribMun']       ?? {}) as Record<string, unknown>;
-  const totTrib  = (trib['totTrib']       ?? {}) as Record<string, unknown>;
-  const vTotTrib = (totTrib['vTotTrib']   ?? {}) as Record<string, unknown>;
   const tpRetISSQN = str(tribMun['tpRetISSQN'] ?? '');
   const issRetido = tpRetISSQN === '2' || tpRetISSQN === '3';
-
-  // Tributos federais totais (vTotTribFed engloba IRRF+PIS+COFINS+CSLL+INSS)
-  const totalTribFed = num(vTotTrib['vTotTribFed'] ?? 0);
 
   // chaveAcesso = Id do atributo (50 chars) — garante unicidade
   const chaveAcesso = id || `NFSe-${cnpjEmitente}-${numero}`;
 
-  return {
-    chaveAcesso,
-    tipoDoc: 'nfse',
-    numero,
-    dataEmissao,
-    competencia,
-    natureza: 'servico_prestado',
-    cnpjEmitente,
-    nomeEmitente: nomeEmitente || undefined,
-    cnpjTomador:  cnpjTomador  || undefined,
-    nomeTomador:  nomeTomador  || undefined,
-    valorBruto:    valorServicos,
-    valorDeducoes: 0,
-    valorLiquido,
-    issRetido,
-    valorIss,
-    retPis:    0,
-    retCofins: 0,
-    retCsll:   0,
-    retIrrf:   totalTribFed,  // vTotTribFed é predominantemente IRRF neste contexto
-    retInss:   0,
-    icmsDebito:  0,
-    icmsCredito: 0,
-    cancelada,
-    xmlRaw: xml,
-  };
+  // Retenções federais — grupo tribFed (vRetIRRF / vRetCSLL / vRetCP).
+  // ATENÇÃO: totTrib/vTotTribFed é o total aproximado da Lei 12.741, NÃO é retenção.
+  const tribFed   = (trib['tribFed']        ?? {}) as Record<string, unknown>;
+  const piscofins = (tribFed['piscofins']   ?? {}) as Record<string, unknown>;
+  const retIrrf = num(tribFed['vRetIRRF'] ?? 0);
+  const retInss = num(tribFed['vRetCP']   ?? 0);
+  const vRetCsll = num(tribFed['vRetCSLL'] ?? 0);
+
+  // Vários emissores informam em vRetCSLL o CSRF inteiro (PIS 0,65 + COFINS 3 + CSLL 1 = 4,65%).
+  // Quando o valor bate com 4,65% do serviço, reparte nas três contribuições.
+  if (vRetCsll > 0 && Math.abs(vRetCsll - valorServicos * 0.0465) < 0.02) {
+    const retPis    = Math.round(valorServicos * 0.0065 * 100) / 100;
+    const retCofins = Math.round(valorServicos * 0.03   * 100) / 100;
+    const retCsll   = Math.round((vRetCsll - retPis - retCofins) * 100) / 100;
+    return montar({ retIrrf, retPis, retCofins, retCsll, retInss });
+  }
+
+  const retCsll = vRetCsll;
+  const vPis    = num(piscofins['vPis']    ?? 0);
+  const vCofins = num(piscofins['vCofins'] ?? 0);
+
+  // PIS/COFINS em <piscofins> podem ser só destacados (apuração própria) ou retidos.
+  // O significado de tpRetPisCofins mudou entre versões do leiaute, então a prova é o
+  // vLiq do emissor: se ele descontou PIS/COFINS, foram retidos.
+  const descontado = valorServicos - valorLiquido - (issRetido ? valorIss : 0);
+  const semPisCofins = retIrrf + retCsll + retInss;
+  const bate = (v: number) => Math.abs(descontado - v) < 0.05;
+  const pisCofinsRetidos = vPis + vCofins > 0 && (
+    bate(semPisCofins + vPis + vCofins) ||
+    (!bate(semPisCofins) && str(piscofins['tpRetPisCofins']) === '1')
+  );
+  return montar({
+    retIrrf, retCsll, retInss,
+    retPis:    pisCofinsRetidos ? vPis    : 0,
+    retCofins: pisCofinsRetidos ? vCofins : 0,
+  });
+
+  function montar(ret: Pick<ParsedNota, 'retIrrf' | 'retPis' | 'retCofins' | 'retCsll' | 'retInss'>): ParsedNota {
+    return {
+      chaveAcesso,
+      tipoDoc: 'nfse',
+      numero,
+      dataEmissao,
+      competencia,
+      natureza: 'servico_prestado',
+      cnpjEmitente,
+      nomeEmitente: nomeEmitente || undefined,
+      cnpjTomador:  cnpjTomador  || undefined,
+      nomeTomador:  nomeTomador  || undefined,
+      valorBruto:    valorServicos,
+      valorDeducoes: 0,
+      valorLiquido,
+      issRetido,
+      valorIss,
+      ...ret,
+      icmsDebito:  0,
+      icmsCredito: 0,
+      cancelada,
+      xmlRaw: xml,
+    };
+  }
 }
 
 // ── ABRASF legado ─────────────────────────────────────────────────────────────

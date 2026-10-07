@@ -170,6 +170,67 @@ router.get('/', async (req, res) => {
   });
 });
 
+// POST /v1/notas/reprocessar-retencoes — relê as retenções federais/ISS do XML das notas já importadas
+// Body: { empresa_id?, competencia?, natureza?, aplicar?: boolean } — sem aplicar=true apenas lista as diferenças
+// ATENÇÃO: retenções de servico_prestado entram na apuração — reprocessar prestadas altera impostos.
+router.post('/reprocessar-retencoes', async (req, res) => {
+  const { empresa_id, competencia, natureza, aplicar } =
+    req.body as { empresa_id?: number; competencia?: string; natureza?: string; aplicar?: boolean };
+  const conds = [`n.xml_raw IS NOT NULL`, `n.tipo_doc = 'nfse'`];
+  const params: unknown[] = [];
+  if (empresa_id)  { params.push(Number(empresa_id)); conds.push(`n.empresa_id = $${params.length}`); }
+  if (competencia) { params.push(String(competencia)); conds.push(`n.competencia = $${params.length}`); }
+  if (natureza)    { params.push(String(natureza));    conds.push(`n.natureza = $${params.length}`); }
+
+  const campos = ['ret_irrf', 'ret_pis', 'ret_cofins', 'ret_csll', 'ret_inss', 'iss_retido', 'valor_iss', 'valor_liquido'] as const;
+  const r = await query<Record<string, unknown>>(
+    `SELECT n.id, e.nome AS empresa, n.numero, n.competencia, n.natureza, n.xml_raw, ${campos.map(c => 'n.' + c).join(', ')}
+       FROM notas n JOIN empresas e ON e.id = n.empresa_id WHERE ${conds.join(' AND ')}`,
+    params
+  );
+
+  const alteradas: Record<string, unknown>[] = [];
+  for (const row of r.rows) {
+    let nota: ParsedNota | undefined;
+    try { nota = (await parseXml(String(row['xml_raw'])))[0]; } catch { continue; }
+    if (!nota) continue;
+    const novo: Record<(typeof campos)[number], number | boolean> = {
+      ret_irrf: nota.retIrrf, ret_pis: nota.retPis, ret_cofins: nota.retCofins,
+      ret_csll: nota.retCsll, ret_inss: nota.retInss,
+      iss_retido: nota.issRetido, valor_iss: nota.valorIss, valor_liquido: nota.valorLiquido,
+    };
+    const diff: Record<string, unknown> = {};
+    for (const c of campos) {
+      const atual = row[c];
+      const igual = typeof novo[c] === 'boolean'
+        ? Boolean(atual) === novo[c]
+        : Math.abs(parseFloat(String(atual ?? 0)) - Number(novo[c])) < 0.005;
+      if (!igual) diff[c] = { de: atual, para: novo[c] };
+    }
+    if (Object.keys(diff).length === 0) continue;
+    alteradas.push({ id: row['id'], empresa: row['empresa'], numero: row['numero'],
+      competencia: row['competencia'], natureza: row['natureza'], alteracoes: diff });
+    if (aplicar) {
+      await query(
+        `UPDATE notas SET ${campos.map((c, i) => `${c} = $${i + 2}`).join(', ')} WHERE id = $1`,
+        [row['id'], ...campos.map(c => novo[c])]
+      );
+    }
+  }
+  return res.json({ analisadas: r.rows.length, alteradas: alteradas.length, aplicado: Boolean(aplicar), notas: alteradas });
+});
+
+// GET /v1/notas/:id/xml — XML original da nota
+router.get('/:id/xml', async (req, res) => {
+  const r = await query<{ numero: string; xml_raw: string | null }>(
+    `SELECT numero, xml_raw FROM notas WHERE id = $1`, [Number(req.params['id'])]
+  );
+  const nota = r.rows[0];
+  if (!nota?.xml_raw) return res.status(404).json({ erro: 'XML não disponível para esta nota' });
+  res.setHeader('Content-Disposition', `attachment; filename="nota-${nota.numero ?? req.params['id']}.xml"`);
+  return res.type('application/xml').send(nota.xml_raw);
+});
+
 // PATCH /v1/notas/:id — atualiza campos de uma nota
 router.patch('/:id', async (req, res) => {
   const id = Number(req.params['id']);

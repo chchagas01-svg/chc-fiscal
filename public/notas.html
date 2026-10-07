@@ -409,6 +409,7 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
   <div class="tabs" id="tabs" style="display:none">
     <button class="tab active" data-tab="saida">Saída</button>
     <button class="tab" data-tab="entrada">Entrada</button>
+    <button class="tab" data-tab="retencoes">Retenções (Reinf)</button>
   </div>
 
   <div class="table-wrap">
@@ -477,6 +478,55 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
           </thead>
           <tbody id="body-entrada"></tbody>
           <tfoot id="foot-entrada"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- Retenções sobre serviços tomados (EFD-Reinf) -->
+    <div id="painel-retencoes" style="display:none">
+      <div class="summary" style="margin:12px 0">
+        <div class="tile entrada">
+          <div class="tile-label">IRRF — DARF 1708</div>
+          <div class="tile-value" id="rt-irrf">—</div>
+          <div class="tile-sub">R-4020 · 1,5% serviços profissionais</div>
+        </div>
+        <div class="tile entrada">
+          <div class="tile-label">CSRF — DARF 5952</div>
+          <div class="tile-value" id="rt-csrf">—</div>
+          <div class="tile-sub" id="rt-csrf-sub">—</div>
+        </div>
+        <div class="tile entrada">
+          <div class="tile-label">INSS retido 11% — R-2010</div>
+          <div class="tile-value" id="rt-inss">—</div>
+          <div class="tile-sub">cessão de mão de obra / empreitada</div>
+        </div>
+        <div class="tile canc">
+          <div class="tile-label">Notas para conferir</div>
+          <div class="tile-value" id="rt-alertas">—</div>
+          <div class="tile-sub" id="rt-notas">—</div>
+        </div>
+      </div>
+      <div class="tbl-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Nº</th>
+              <th>Emissão</th>
+              <th>Prestador</th>
+              <th class="mono">CNPJ</th>
+              <th>Regime</th>
+              <th class="num">Valor Bruto</th>
+              <th class="num">IRRF 1708</th>
+              <th class="num">PIS</th>
+              <th class="num">COFINS</th>
+              <th class="num">CSLL</th>
+              <th class="num">CSRF 5952</th>
+              <th class="num">INSS</th>
+              <th>Conferir</th>
+            </tr>
+          </thead>
+          <tbody id="body-retencoes"></tbody>
+          <tfoot id="foot-retencoes"></tfoot>
         </table>
       </div>
     </div>
@@ -732,6 +782,72 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
     });
     document.getElementById('painel-saida').style.display  = tab === 'saida'  ? '' : 'none';
     document.getElementById('painel-entrada').style.display = tab === 'entrada' ? '' : 'none';
+    document.getElementById('painel-retencoes').style.display = tab === 'retencoes' ? '' : 'none';
+    if (tab === 'retencoes') carregarRetencoes();
+  }
+
+  // ── Retenções (EFD-Reinf) ──────────────────────────
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  const REGIME = { nao_optante: 'Não optante', simples: 'Simples', mei: 'MEI', desconhecido: '?' };
+
+  async function carregarRetencoes() {
+    const empresaId = document.getElementById('sel-empresa').value;
+    const comp = document.getElementById('sel-comp').value;
+    const tbody = document.getElementById('body-retencoes');
+    tbody.innerHTML = '<tr><td colspan="13">Carregando...</td></tr>';
+    try {
+      const r = await fetch('/v1/relatorio/retencoes/' + comp + '?empresa_id=' + empresaId, { headers: headers() });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.erro || 'HTTP ' + r.status);
+      const t = d.totais;
+      document.getElementById('rt-irrf').textContent = fmtR(t.irrf_1708);
+      document.getElementById('rt-csrf').textContent = fmtR(t.csrf_5952.total);
+      document.getElementById('rt-csrf-sub').textContent =
+        'PIS ' + fmt(t.csrf_5952.pis) + ' · COFINS ' + fmt(t.csrf_5952.cofins) + ' · CSLL ' + fmt(t.csrf_5952.csll);
+      document.getElementById('rt-inss').textContent = fmtR(t.inss_r2010);
+      document.getElementById('rt-alertas').textContent = String(t.notas_com_alerta);
+      document.getElementById('rt-notas').textContent = t.notas + ' serviços tomados · ' + fmtR(t.valor_bruto);
+
+      // Notas com retenção ou alerta primeiro
+      const notas = d.notas.slice().sort(function(a, b) {
+        const pa = (a.irrf_1708 + a.csrf_5952 + a.inss_r2010 > 0 ? 2 : 0) + (a.alertas.length ? 1 : 0);
+        const pb = (b.irrf_1708 + b.csrf_5952 + b.inss_r2010 > 0 ? 2 : 0) + (b.alertas.length ? 1 : 0);
+        return pb - pa;
+      });
+      const v = function(n) { return n ? fmt(n) : '<span style="color:var(--fg-2)">—</span>'; };
+      tbody.innerHTML = notas.map(function(n) {
+        return '<tr>' +
+          '<td>' + esc(n.numero) + '</td>' +
+          '<td>' + fmtData(n.data_emissao) + '</td>' +
+          '<td>' + esc(n.prestador) + '</td>' +
+          '<td class="mono">' + formatCnpj(n.cnpj_prestador) + '</td>' +
+          '<td>' + (REGIME[n.regime] || esc(n.regime)) + '</td>' +
+          '<td class="num">' + fmt(n.valor_bruto) + '</td>' +
+          '<td class="num">' + v(n.irrf_1708) + '</td>' +
+          '<td class="num">' + v(n.pis) + '</td>' +
+          '<td class="num">' + v(n.cofins) + '</td>' +
+          '<td class="num">' + v(n.csll) + '</td>' +
+          '<td class="num">' + v(n.csrf_5952) + '</td>' +
+          '<td class="num">' + v(n.inss_r2010) + '</td>' +
+          '<td style="color:var(--warn);font-size:12px">' + n.alertas.map(esc).join('<br>') + '</td>' +
+          '</tr>';
+      }).join('') || '<tr><td colspan="13">Nenhum serviço tomado nesta competência.</td></tr>';
+      document.getElementById('foot-retencoes').innerHTML =
+        '<tr><td colspan="5"><strong>Total</strong></td>' +
+        '<td class="num"><strong>' + fmt(t.valor_bruto) + '</strong></td>' +
+        '<td class="num"><strong>' + fmt(t.irrf_1708) + '</strong></td>' +
+        '<td class="num">' + fmt(t.csrf_5952.pis) + '</td>' +
+        '<td class="num">' + fmt(t.csrf_5952.cofins) + '</td>' +
+        '<td class="num">' + fmt(t.csrf_5952.csll) + '</td>' +
+        '<td class="num"><strong>' + fmt(t.csrf_5952.total) + '</strong></td>' +
+        '<td class="num"><strong>' + fmt(t.inss_r2010) + '</strong></td><td></td></tr>';
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="13">Erro: ' + esc(e.message) + '</td></tr>';
+    }
   }
 
   // ── Formatters ─────────────────────────────────────
