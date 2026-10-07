@@ -3,6 +3,11 @@ import { qyonClient } from '../qyon/QyonClient';
 import { parseXml } from '../parsers';
 import { TipoDoc, ParsedNota } from '../../types/nota';
 
+function naturezaPorFluxo(tipo: TipoDoc, fluxo: 1 | 2): ParsedNota['natureza'] {
+  if (fluxo === 2) return tipo === 'nfse' ? 'servico_prestado' : 'venda';
+  return tipo === 'nfse' ? 'servico_tomado' : 'compra';
+}
+
 const TIPOS_DOC: TipoDoc[] = ['nfse', 'nfe', 'nfce', 'cte'];
 
 // Último dia do mês para um dado YYYY-MM
@@ -10,6 +15,21 @@ function ultimoDiaDoMes(competencia: string): string {
   const [year, month] = competencia.split('-').map(Number);
   const ultimo = new Date(year!, month!, 0); // dia 0 do próximo mês = último do atual
   return `${year}-${String(month).padStart(2, '0')}-${String(ultimo.getDate()).padStart(2, '0')}`;
+}
+
+function proximaCompetencia(competencia: string): string {
+  const [year, month] = competencia.split('-').map(Number);
+  const d = new Date(year!, month!, 1); // month já é 1-based → aponta para o mês seguinte
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Competência em que a nota deve ser lançada: a declarada no documento (NFS-e),
+// senão o mês de emissão, senão a competência da captura.
+export function competenciaDaNota(nota: ParsedNota, fallback: string): string {
+  if (nota.competencia) return nota.competencia;
+  const t = nota.dataEmissao.getTime();
+  if (t > 0) return nota.dataEmissao.toISOString().substring(0, 7);
+  return fallback;
 }
 
 interface EmpresaRow {
@@ -61,11 +81,11 @@ async function registrarAudit(
 }
 
 // Retorna true se inserida, false se já existia (duplicata silenciosa)
-async function inserirNota(empresaId: number, competencia: string, nota: ParsedNota): Promise<boolean> {
+export async function inserirNota(empresaId: number, competencia: string, nota: ParsedNota): Promise<boolean> {
   const result = await query(
     `INSERT INTO notas (
        empresa_id, chave_acesso, tipo_doc, numero, serie, data_emissao, competencia,
-       natureza, cnpj_emitente, nome_emitente, cnpj_tomador, nome_tomador,
+       natureza, cfop, cnpj_emitente, nome_emitente, cnpj_tomador, nome_tomador,
        valor_bruto, valor_deducoes, valor_liquido,
        iss_retido, valor_iss,
        ret_pis, ret_cofins, ret_csll, ret_irrf, ret_inss,
@@ -73,18 +93,18 @@ async function inserirNota(empresaId: number, competencia: string, nota: ParsedN
        cancelada, chave_substituta, xml_raw
      ) VALUES (
        $1,$2,$3,$4,$5,$6,$7,
-       $8,$9,$10,$11,$12,
-       $13,$14,$15,
-       $16,$17,
-       $18,$19,$20,$21,$22,
-       $23,$24,
-       $25,$26,$27
+       $8,$9,$10,$11,$12,$13,
+       $14,$15,$16,
+       $17,$18,
+       $19,$20,$21,$22,$23,
+       $24,$25,
+       $26,$27,$28
      )
      ON CONFLICT (chave_acesso) DO NOTHING`,
     [
       empresaId, nota.chaveAcesso, nota.tipoDoc, nota.numero ?? null, nota.serie ?? null,
       nota.dataEmissao, competencia,
-      nota.natureza, nota.cnpjEmitente, nota.nomeEmitente ?? null,
+      nota.natureza, nota.cfop ?? null, nota.cnpjEmitente, nota.nomeEmitente ?? null,
       nota.cnpjTomador ?? null, nota.nomeTomador ?? null,
       nota.valorBruto, nota.valorDeducoes, nota.valorLiquido,
       nota.issRetido, nota.valorIss,
@@ -113,12 +133,28 @@ async function capturarEmpresa(
 
   const dataInicio = `${competencia}-01`;
   const dataFim = ultimoDiaDoMes(competencia);
+  // NFS-e é lançada pela competência, não pela emissão: uma nota de competência M
+  // pode ser emitida no mês M+1 (ex.: emitida 01/10 referente a 09). Por isso a
+  // NFS-e também é buscada no mês seguinte (até hoje). O Qyon recusa (HTTP 400)
+  // períodos que atravessam meses, então cada mês é uma chamada separada.
+  const hoje = new Date().toISOString().substring(0, 10);
+  const proxima = proximaCompetencia(competencia);
+  const inicioSeguinte = `${proxima}-01`;
+  const fimSeguinte = ultimoDiaDoMes(proxima);
+
+  async function listar(tipo: TipoDoc) {
+    const items = await qyonClient.listDocuments(tipo, empresa.qyon_access_key, dataInicio, dataFim);
+    if (tipo !== 'nfse' || inicioSeguinte > hoje) return items;
+    const seguinte = await qyonClient.listDocuments(
+      tipo, empresa.qyon_access_key, inicioSeguinte, fimSeguinte < hoje ? fimSeguinte : hoje
+    );
+    const vistas = new Set(items.map(i => i.chave));
+    return [...items, ...seguinte.filter(i => !vistas.has(i.chave))];
+  }
 
   for (const tipo of TIPOS_DOC) {
     try {
-      const items = await qyonClient.listDocuments(
-        tipo, empresa.qyon_access_key, dataInicio, dataFim
-      );
+      const items = await listar(tipo);
 
       console.log(`[captura] ${empresa.cnpj} ${tipo}: ${items.length} item(s) listado(s)`);
       if (items.length === 0) continue;
@@ -134,12 +170,24 @@ async function capturarEmpresa(
 
           // Inserção — ON CONFLICT DO NOTHING garante idempotência
           for (const nota of notas) {
-            const inserida = await inserirNota(empresa.id, competencia, nota);
-            if (inserida) {
-              resultado.notas_importadas++;
-            } else {
-              resultado.notas_ignoradas_duplicatas++;
+            // Qyon informa a direção (1=Entrada, 2=Saída); o parser não tem essa info
+            const notaComNatureza: ParsedNota = {
+              ...nota,
+              natureza: naturezaPorFluxo(tipo, item.fluxo),
+            };
+
+            // Demais documentos seguem o mês de emissão (= mês da busca)
+            const compNota = tipo === 'nfse' ? competenciaDaNota(nota, competencia) : competencia;
+            if (compNota > competencia) continue; // competência futura: entra na captura do próprio mês
+            const inserida = await inserirNota(empresa.id, compNota, notaComNatureza);
+            if (inserida && compNota < competencia) {
+              // Emitida neste mês, mas de competência anterior → lançada na competência correta
+              console.log(`[captura] ${empresa.cnpj} nfse ${nota.numero}: capturada em ${competencia}, lançada em ${compNota}`);
+              await registrarAudit(compNota, empresa.id, 'captura_nota_competencia_anterior',
+                { numero: nota.numero, chave: nota.chaveAcesso, capturada_em: competencia }, 'lancada');
             }
+            if (inserida) resultado.notas_importadas++;
+            else resultado.notas_ignoradas_duplicatas++;
           }
         } catch (itemErr) {
           // Isola falha de 1 documento para não travar os demais
@@ -166,6 +214,13 @@ async function capturarEmpresa(
   const detalhe = resultado.erros.length > 0 ? resultado.erros.join(' | ') : undefined;
   await atualizarEstado(competencia, empresa.id, estadoDb, detalhe);
 
+  console.log(
+    `[captura] ${empresa.cnpj} CONCLUÍDO: ` +
+    `importadas=${resultado.notas_importadas} duplicatas=${resultado.notas_ignoradas_duplicatas} ` +
+    `erros=${resultado.erros.length} status=${resultado.status}` +
+    (resultado.erros.length > 0 ? ` | ${resultado.erros.slice(0, 3).join(' | ')}` : '')
+  );
+
   await registrarAudit(
     competencia,
     empresa.id,
@@ -177,10 +232,15 @@ async function capturarEmpresa(
   return resultado;
 }
 
-export async function capturar(competencia: string): Promise<ResultadoEmpresa[]> {
+export async function capturar(competencia: string, cnpjs?: string[]): Promise<ResultadoEmpresa[]> {
+  const filtro = cnpjs && cnpjs.length > 0
+    ? `AND cnpj = ANY($1::text[])`
+    : '';
+  const params = cnpjs && cnpjs.length > 0 ? [cnpjs] : [];
   const empresasResult = await query<EmpresaRow>(
     `SELECT id, cnpj, nome, regime, qyon_access_key
-     FROM empresas WHERE ativo = true ORDER BY nome`
+     FROM empresas WHERE ativo = true ${filtro} ORDER BY nome`,
+    params
   );
 
   const empresas = empresasResult.rows;

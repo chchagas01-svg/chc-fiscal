@@ -1,7 +1,29 @@
 // Parser NF-e modelo 55 (nfeProc / NFe) e NFC-e modelo 65 (nfceProc)
 import { parseStringPromise } from 'xml2js';
 import { ParsedNota, TipoDoc } from '../../types/nota';
-import { str, num, cleanDoc, dig, parseDate, extractCnpj } from './helpers';
+import { str, num, cleanDoc, dig, parseDate } from './helpers';
+
+// CFOPs que NÃO representam receita: devoluções, remessas, transferências, retornos
+const CFOPS_NAO_RECEITA = new Set([
+  // Devoluções de compras / retornos de mercadoria
+  '5201','5202','5203','5204','5205','5206','5207','5208','5209','5210','5214',
+  '6201','6202','6203','6204','6205','6206','6207','6208','6209','6210',
+  // Devoluções com ICMS-ST
+  '5410','5411','5412','5413','5414','5415','5416','5417','5418',
+  '6410','6411','6412','6413',
+  // Remessas (sem transferência de propriedade)
+  '5901','5902','5903','5904','5905','5906','5907','5908','5909','5910',
+  '5911','5912','5913','5914','5915','5916','5917','5918','5919','5920',
+  '5921','5922','5923','5924','5925','5926','5927',
+  '6901','6902','6903','6904','6905','6906','6907','6908','6909','6910',
+  // Transferências entre estabelecimentos
+  '5151','5152','5153','5154','5155','5156',
+  '5551','5552','5553','5554','5555','5556','5557',
+  '6151','6152','6153','6154','6155','6156',
+  '6551','6552','6553','6554','6555','6556','6557',
+  // Outras saídas não comerciais (retorno, amostra, brinde, conserto etc.)
+  '5949','6949',
+]);
 
 export async function parseNfe(xml: string, tipoDoc: TipoDoc = 'nfe'): Promise<ParsedNota> {
   const root = await parseStringPromise(xml, {
@@ -71,10 +93,15 @@ export async function parseNfe(xml: string, tipoDoc: TipoDoc = 'nfe'): Promise<P
     return tpRet === '2' || tpRet === '3';
   });
 
+  // CFOP — usa o do primeiro item (NFs comerciais geralmente têm um único CFOP)
+  const cfop = itens.length > 0 ? str(dig(itens[0] as Record<string, unknown>, 'prod', 'CFOP') ?? '') : '';
+
   // Natureza: saída (55) → venda; entrada → compra; NFC-e → venda
+  // CFOPs de retorno/remessa/transferência → 'outro' (não é receita)
   const tpNF = str(ide['tpNF']); // 0=entrada, 1=saída
-  const natureza = tpNF === '1' || modelo === '65'
-    ? 'venda' as const
+  const isSaida = tpNF === '1' || modelo === '65';
+  const natureza = isSaida
+    ? (CFOPS_NAO_RECEITA.has(cfop) ? 'outro' as const : 'venda' as const)
     : 'compra' as const;
 
   // Cancelamento
@@ -95,6 +122,7 @@ export async function parseNfe(xml: string, tipoDoc: TipoDoc = 'nfe'): Promise<P
     serie,
     dataEmissao,
     natureza,
+    cfop: cfop || undefined,
     cnpjEmitente,
     nomeEmitente: nomeEmitente || undefined,
     cnpjTomador: cnpjDest || undefined,

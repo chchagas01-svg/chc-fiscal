@@ -2,11 +2,14 @@
 // Suporta também CompNfse e outros wrappers municipais
 import { parseStringPromise } from 'xml2js';
 import { ParsedNota } from '../../types/nota';
-import { str, num, cleanDoc, dig, parseDate, extractCnpj } from './helpers';
+import { str, num, cleanDoc, dig, parseDate, extractCnpj, toCompetencia } from './helpers';
 
 async function parseSingleAbrasf(inf: Record<string, unknown>, xml: string): Promise<ParsedNota> {
   const numero = str(inf['Numero']);
   const dataEmissao = parseDate(inf['DataEmissao'] ?? inf['Competencia']);
+  const competencia = toCompetencia(
+    inf['Competencia'] ?? dig(inf, 'DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Competencia')
+  );
 
   // Prestador
   const prestador = (inf['PrestadorServico'] ?? inf['Prestador']) as Record<string, unknown> | undefined;
@@ -35,9 +38,13 @@ async function parseSingleAbrasf(inf: Record<string, unknown>, xml: string): Pro
   const valorLiquido = num(valores['ValorLiquidoNfse']) || (valorServicos - valorDeducoes);
   const valorIss = num(valores['ValorIss'] ?? valores['ValorISS']);
 
-  // ISS retido — ABRASF: IssRetido = 1 → retido, 2 → não retido
+  // ISS retido — prioridade: tpRetISSQN (Padrão Nacional NFS-e: 1=não retido, 2=retido tomador, 3=retido intermediário)
+  // Fallback: IssRetido (ABRASF antigo: 1=retido, 2=não retido)
+  const tpRetISSQN   = str(valores['tpRetISSQN'] ?? dig(servico, 'tpRetISSQN') ?? '');
   const issRetidoFlag = str(valores['IssRetido'] ?? '');
-  const issRetido = issRetidoFlag === '1';
+  const issRetido = tpRetISSQN
+    ? tpRetISSQN === '2' || tpRetISSQN === '3'
+    : issRetidoFlag === '1';
 
   // Retenções federais
   // ABRASF: verificar tpRetPisCofins antes de somar
@@ -68,6 +75,7 @@ async function parseSingleAbrasf(inf: Record<string, unknown>, xml: string): Pro
     tipoDoc: 'nfse',
     numero,
     dataEmissao,
+    competencia,
     natureza: 'servico_prestado',
     cnpjEmitente: cnpjPrestador,
     nomeEmitente: nomePrestador || undefined,

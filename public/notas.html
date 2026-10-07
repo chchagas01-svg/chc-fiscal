@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHC-Fiscal — Conferência de Notas</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* ── Tokens (idênticos ao dashboard) ─────────────────── */
+:root {
+  --bg: #F4F5FB; --surface: #fff; --surface-2: #ECEEF8;
+  --fg: #1A1D30; --fg-2: #606480; --accent: #3549D6; --accent-s: #E5E8FF;
+  --ok: #15803D; --ok-s: #DCFCE7;
+  --warn: #92400E; --warn-s: #FEF3C7;
+  --err: #B91C1C; --err-s: #FEE2E2;
+  --border: #DDE0F0; --r: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+    --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+    --ok: #22C55E; --ok-s: #052E14;
+    --warn: #F59E0B; --warn-s: #1C1102;
+    --err: #F87171; --err-s: #2C0808;
+    --border: #24284A; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+  --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+  --ok: #22C55E; --ok-s: #052E14;
+  --warn: #F59E0B; --warn-s: #1C1102;
+  --err: #F87171; --err-s: #2C0808;
+  --border: #24284A; color-scheme: dark;
+}
+
+* { box-sizing: border-box; margin: 0; }
+html, body { min-height: 100%; }
+body {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  background: var(--bg); color: var(--fg);
+  font-size: 14px; line-height: 1.5;
+}
+
+/* ── Login ───────────────────────────────────────────── */
+#login-screen {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; padding: 20px;
+}
+.login-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 36px 32px; width: 100%; max-width: 360px;
+}
+.login-logo { color: var(--accent); font-weight: 600; font-size: 16px; margin-bottom: 24px; }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.field label { font-size: 11px; font-weight: 600; color: var(--fg-2); text-transform: uppercase; letter-spacing: .06em; }
+.field input, .field select {
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface-2); color: var(--fg); width: 100%;
+}
+.field input:focus, .field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.btn-primary {
+  width: 100%; padding: 10px; border: none; border-radius: 8px;
+  background: var(--accent); color: #fff; font-family: inherit;
+  font-size: 14px; font-weight: 500; cursor: pointer;
+}
+.btn-primary:hover { opacity: .88; }
+
+/* ── App ─────────────────────────────────────────────── */
+#app { display: none; }
+
+header {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 14px 24px; display: flex; align-items: center; gap: 16px;
+  position: sticky; top: 0; z-index: 10;
+}
+.logo { color: var(--accent); font-weight: 600; font-size: 15px; }
+.page-title { font-weight: 600; font-size: 15px; color: var(--fg); }
+.sep { color: var(--border); }
+header a.back {
+  margin-left: auto; font-size: 13px; color: var(--fg-2);
+  text-decoration: none; padding: 6px 12px;
+  border: 1px solid var(--border); border-radius: 6px;
+}
+header a.back:hover { background: var(--surface-2); }
+
+/* ── Filters ─────────────────────────────────────────── */
+.filters {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 14px 24px; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+}
+.filters .field { margin: 0; min-width: 200px; flex: 1; }
+.filters .field select, .filters .field input {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px;
+}
+.btn-buscar {
+  padding: 9px 20px; border: none; border-radius: 7px;
+  background: var(--accent); color: #fff; font-family: inherit;
+  font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+  align-self: flex-end;
+}
+.btn-buscar:hover { opacity: .88; }
+.btn-buscar:disabled { opacity: .5; cursor: default; }
+
+/* ── Summary tiles ───────────────────────────────────── */
+.summary {
+  padding: 20px 24px; display: flex; gap: 14px; flex-wrap: wrap;
+}
+.tile {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 16px 20px; flex: 1; min-width: 160px;
+}
+.tile-label { font-size: 11px; font-weight: 600; color: var(--fg-2); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.tile-value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile-sub { font-size: 12px; color: var(--fg-2); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.tile.saida .tile-value  { color: var(--ok); }
+.tile.entrada .tile-value { color: var(--accent); }
+.tile.canc .tile-value   { color: var(--err); }
+
+/* ── Tabs ────────────────────────────────────────────── */
+.tabs { padding: 0 24px; display: flex; gap: 2px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.tab {
+  padding: 10px 18px; font-size: 13px; font-weight: 500; cursor: pointer;
+  border: none; background: none; color: var(--fg-2);
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab:hover { color: var(--fg); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── Table area ──────────────────────────────────────── */
+.table-wrap {
+  padding: 20px 24px;
+}
+.table-controls {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.table-count { font-size: 13px; color: var(--fg-2); }
+.toggle-canc {
+  margin-left: auto; font-size: 12px; color: var(--fg-2); cursor: pointer;
+  display: flex; align-items: center; gap: 6px; user-select: none;
+}
+.toggle-canc input { cursor: pointer; }
+
+.tbl-container { overflow-x: auto; border-radius: var(--r); border: 1px solid var(--border); }
+table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+thead th {
+  background: var(--surface-2); padding: 10px 12px;
+  text-align: left; font-size: 11px; font-weight: 600;
+  color: var(--fg-2); text-transform: uppercase; letter-spacing: .05em;
+  white-space: nowrap; position: sticky; top: 0;
+}
+thead th.num { text-align: right; }
+tbody tr { border-top: 1px solid var(--border); transition: background .1s; }
+tbody tr:hover { background: var(--surface-2); }
+tbody td { padding: 9px 12px; vertical-align: middle; color: var(--fg); }
+tbody td.num { text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+tbody td.mono { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--fg-2); }
+
+/* Cancelada row */
+tr.cancelada td { color: var(--fg-2); }
+tr.cancelada td.val-bruto { text-decoration: line-through; }
+
+.badge {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .04em;
+}
+.badge-ok   { background: var(--ok-s);   color: var(--ok); }
+.badge-canc { background: var(--err-s);  color: var(--err); }
+.badge-tipo { background: var(--accent-s); color: var(--accent); }
+
+/* ── Empty / loading ─────────────────────────────────── */
+.empty {
+  padding: 60px 24px; text-align: center; color: var(--fg-2);
+}
+.empty p { margin-top: 8px; font-size: 13px; }
+
+/* ── Totals footer ───────────────────────────────────── */
+tfoot td {
+  padding: 10px 12px; font-weight: 600; border-top: 2px solid var(--border);
+  background: var(--surface-2);
+}
+tfoot td.num { text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+
+/* ── Botões de ação na tabela ────────────────────────── */
+.btn-act {
+  display: inline-flex; align-items: center;
+  padding: 3px 9px; border-radius: 5px; font-family: inherit;
+  font-size: 11px; font-weight: 500; border: 1px solid transparent;
+  cursor: pointer; white-space: nowrap; line-height: 1.4;
+}
+.btn-act-edit { background: var(--accent-s); color: var(--accent); }
+.btn-act-canc { background: var(--warn-s);   color: var(--warn); }
+.btn-act-del  { background: var(--err-s);    color: var(--err); }
+.btn-act-rest { background: var(--ok-s);     color: var(--ok); }
+.btn-act:hover { opacity: .8; }
+td.acoes { white-space: nowrap; }
+td.acoes .btn-act + .btn-act { margin-left: 4px; }
+
+/* ── Modal ───────────────────────────────────────────── */
+.modal-bg {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 200;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.modal-box {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 24px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.modal-title { font-size: 15px; font-weight: 600; }
+.modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.modal-grid .field { margin: 0; }
+.modal-grid .field.full { grid-column: 1 / -1; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.btn-m { padding: 8px 16px; border: none; border-radius: 7px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.btn-m-ghost   { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); }
+.btn-m-primary { background: var(--accent); color: #fff; }
+.btn-m-danger  { background: var(--err); color: #fff; }
+.btn-m:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Nova Nota / Toast ───────────────────────────────── */
+.btn-nova { padding: 7px 14px; border: none; border-radius: 7px; background: var(--accent); color: #fff; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.btn-nova:hover { opacity: .88; }
+#toast {
+  position: fixed; bottom: 20px; right: 20px; z-index: 999;
+  padding: 9px 15px; border-radius: 9px; font-size: 13px; font-weight: 500;
+  opacity: 0; transform: translateY(5px); transition: all .2s; pointer-events: none; max-width: 300px;
+}
+#toast.show { opacity: 1; transform: none; }
+#toast.t-ok { background: var(--ok); color: #fff; }
+#toast.t-err { background: var(--err); color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">◆ CHC-Fiscal</div>
+    <div class="field">
+      <label>Chave de API</label>
+      <input type="password" id="api-key-input" placeholder="Cole a chave aqui" autocomplete="current-password">
+    </div>
+    <button class="btn-primary" id="btn-login">Entrar</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <header>
+    <span class="logo">◆ CHC-Fiscal</span>
+    <span class="sep">|</span>
+    <span class="page-title">Conferência de Notas</span>
+    <a class="back" href="/">← Painel</a>
+  </header>
+
+  <div class="filters">
+    <div class="field">
+      <label>Empresa</label>
+      <select id="sel-empresa"><option value="">Selecione...</option></select>
+    </div>
+    <div class="field">
+      <label>Competência</label>
+      <input type="month" id="sel-comp" value="2026-09">
+    </div>
+    <button class="btn-buscar" id="btn-buscar">Buscar</button>
+    <button class="btn-nova" id="btn-nova-nota" style="align-self:flex-end" disabled>+ Nova Nota</button>
+    <button class="btn-nova" id="btn-importar-xml" style="align-self:flex-end" disabled title="Importa NFS-e/NF-e avulsas; a competência vem do próprio XML">Importar XML</button>
+    <input type="file" id="inp-xml" accept=".xml,text/xml" multiple style="display:none">
+    <button class="btn-nova" id="btn-excluir-mes" style="align-self:flex-end;background:var(--err)" disabled>Excluir todas do mês</button>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast"></div>
+
+  <!-- MODAL NOTA (editar / criar) -->
+  <div id="modal-nota" class="modal-bg" style="display:none">
+    <div class="modal-box">
+      <div class="modal-title" id="modal-nota-titulo">Nova Nota</div>
+      <div class="modal-grid">
+        <div class="field">
+          <label>Tipo</label>
+          <select id="mn-tipo">
+            <option value="nfse">NFS-e</option>
+            <option value="nfe">NF-e</option>
+            <option value="nfce">NFC-e</option>
+            <option value="manual">Manual</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Natureza</label>
+          <select id="mn-natureza">
+            <option value="servico_prestado">Serviço Prestado</option>
+            <option value="venda">Venda</option>
+            <option value="servico_tomado">Serviço Tomado</option>
+            <option value="compra">Compra</option>
+            <option value="outro">Outro (não é receita)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Número</label>
+          <input type="text" id="mn-numero" placeholder="Ex: 1234">
+        </div>
+        <div class="field">
+          <label>Data Emissão</label>
+          <input type="date" id="mn-data">
+        </div>
+        <div class="field">
+          <label>Valor Bruto (R$)</label>
+          <input type="number" id="mn-bruto" step="0.01" min="0" placeholder="0,00">
+        </div>
+        <div class="field">
+          <label>Valor Deduções (R$)</label>
+          <input type="number" id="mn-deducoes" step="0.01" min="0" placeholder="0,00" value="0">
+        </div>
+        <div class="field">
+          <label>Valor Líquido (R$)</label>
+          <input type="number" id="mn-liquido" step="0.01" min="0" placeholder="0,00">
+        </div>
+        <div class="field">
+          <label>CFOP</label>
+          <input type="text" id="mn-cfop" placeholder="Ex: 5102">
+        </div>
+        <div class="field">
+          <label>Nome Tomador / Emitente</label>
+          <input type="text" id="mn-nome-contraparte" placeholder="Razão Social">
+        </div>
+        <div class="field">
+          <label>CNPJ Tomador / Emitente</label>
+          <input type="text" id="mn-cnpj-contraparte" placeholder="00.000.000/0001-00">
+        </div>
+        <div class="field">
+          <label>Valor ISS (R$)</label>
+          <input type="number" id="mn-iss" step="0.01" min="0" placeholder="0,00" value="0">
+        </div>
+        <div class="field" style="align-self:center; padding-top:18px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="mn-iss-retido"> ISS retido pelo tomador
+          </label>
+        </div>
+        <div class="field">
+          <label>PIS retido (R$)</label>
+          <input type="number" id="mn-pis" step="0.01" min="0" placeholder="0,00" value="0">
+        </div>
+        <div class="field">
+          <label>COFINS retido (R$)</label>
+          <input type="number" id="mn-cofins" step="0.01" min="0" placeholder="0,00" value="0">
+        </div>
+        <div class="field">
+          <label>CSLL retido (R$)</label>
+          <input type="number" id="mn-csll" step="0.01" min="0" placeholder="0,00" value="0">
+        </div>
+        <div class="field">
+          <label>IRRF retido (R$)</label>
+          <input type="number" id="mn-irrf" step="0.01" min="0" placeholder="0,00" value="0">
+        </div>
+        <div class="field">
+          <label>INSS retido (R$)</label>
+          <input type="number" id="mn-inss" step="0.01" min="0" placeholder="0,00" value="0">
+        </div>
+        <div class="field">
+          <label>Cancelada</label>
+          <select id="mn-cancelada">
+            <option value="false">Não</option>
+            <option value="true">Sim</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-m btn-m-ghost" id="btn-mn-cancel">Cancelar</button>
+        <button class="btn-m btn-m-primary" id="btn-mn-save">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CONFIRMAR EXCLUSÃO -->
+  <div id="modal-del" class="modal-bg" style="display:none">
+    <div class="modal-box" style="max-width:380px">
+      <div class="modal-title">Excluir nota?</div>
+      <p style="font-size:13px;color:var(--fg-2)">Esta ação remove permanentemente a nota do banco. Prefira "Cancelar" se quiser apenas marcá-la como cancelada.</p>
+      <div class="modal-actions">
+        <button class="btn-m btn-m-ghost" id="btn-del-cancel">Voltar</button>
+        <button class="btn-m btn-m-danger" id="btn-del-confirm">Excluir</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="summary" id="summary" style="display:none">
+    <div class="tile saida">
+      <div class="tile-label">Saída (serviços / vendas)</div>
+      <div class="tile-value" id="s-docs">—</div>
+      <div class="tile-sub" id="s-valor">—</div>
+    </div>
+    <div class="tile entrada">
+      <div class="tile-label">Entrada (compras / tomados)</div>
+      <div class="tile-value" id="e-docs">—</div>
+      <div class="tile-sub" id="e-valor">—</div>
+    </div>
+    <div class="tile canc">
+      <div class="tile-label">Canceladas (total)</div>
+      <div class="tile-value" id="c-docs">—</div>
+      <div class="tile-sub">incluídas nas abas acima</div>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs" style="display:none">
+    <button class="tab active" data-tab="saida">Saída</button>
+    <button class="tab" data-tab="entrada">Entrada</button>
+  </div>
+
+  <div class="table-wrap">
+    <div id="estado-inicial" class="empty">
+      <strong>Selecione uma empresa e competência</strong>
+      <p>As notas importadas aparecerão aqui para conferência.</p>
+    </div>
+    <div id="carregando" class="empty" style="display:none">
+      <strong>Carregando...</strong>
+    </div>
+
+    <!-- Tabela Saída -->
+    <div id="painel-saida" style="display:none">
+      <div class="table-controls">
+        <span class="table-count" id="count-saida"></span>
+        <label class="toggle-canc">
+          <input type="checkbox" id="chk-canc-saida" checked> Mostrar canceladas
+        </label>
+      </div>
+      <div class="tbl-container">
+        <table id="tbl-saida">
+          <thead>
+            <tr>
+              <th>Nº</th>
+              <th>Tipo</th>
+              <th>Data</th>
+              <th>Tomador</th>
+              <th class="mono">CNPJ Tomador</th>
+              <th class="num">Valor Bruto</th>
+              <th class="num">ISS</th>
+              <th class="num">Ret. IRRF</th>
+              <th class="num">Valor Líquido</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="body-saida"></tbody>
+          <tfoot id="foot-saida"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tabela Entrada -->
+    <div id="painel-entrada" style="display:none">
+      <div class="table-controls">
+        <span class="table-count" id="count-entrada"></span>
+        <label class="toggle-canc">
+          <input type="checkbox" id="chk-canc-entrada" checked> Mostrar canceladas
+        </label>
+      </div>
+      <div class="tbl-container">
+        <table id="tbl-entrada">
+          <thead>
+            <tr>
+              <th>Nº</th>
+              <th>Tipo</th>
+              <th>Data</th>
+              <th>Emitente</th>
+              <th class="mono">CNPJ Emitente</th>
+              <th class="num">Valor Bruto</th>
+              <th class="num">ICMS Créd.</th>
+              <th class="num">Valor Líquido</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="body-entrada"></tbody>
+          <tfoot id="foot-entrada"></tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  let apiKey = '';
+  try { apiKey = localStorage.getItem('chc_api_key') || ''; } catch (e) {}
+
+  function headers() {
+    return { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' };
+  }
+
+  // ── Toast ──────────────────────────────────────────
+  function toast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'show t-' + (type || 'ok');
+    clearTimeout(t._t);
+    t._t = setTimeout(function() { t.className = ''; }, 3000);
+  }
+
+  // ── Auth ───────────────────────────────────────────
+  if (apiKey) {
+    boot();
+  } else {
+    document.getElementById('login-screen').style.display = 'flex';
+  }
+
+  document.getElementById('btn-login').addEventListener('click', function () {
+    const k = document.getElementById('api-key-input').value.trim();
+    if (!k) return;
+    apiKey = k;
+    try { localStorage.setItem('chc_api_key', apiKey); } catch (e) {}
+    document.getElementById('login-screen').style.display = 'none';
+    boot();
+  });
+  document.getElementById('api-key-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') document.getElementById('btn-login').click();
+  });
+
+  // ── Inicialização ──────────────────────────────────
+  function boot() {
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('login-screen').style.display = 'none';
+    carregarEmpresas();
+  }
+
+  let empresasLista = [];
+
+  async function carregarEmpresas() {
+    try {
+      const r = await fetch('/v1/notas/empresas', { headers: headers() });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      empresasLista = await r.json();
+      const sel = document.getElementById('sel-empresa');
+      empresasLista.forEach(function (e) {
+        const opt = document.createElement('option');
+        opt.value = e.id;
+        opt.textContent = e.nome + ' (' + formatCnpj(e.cnpj) + ')';
+        sel.appendChild(opt);
+      });
+    } catch (err) {
+      console.error('Erro ao carregar empresas:', err);
+    }
+  }
+
+  // ── Buscar ─────────────────────────────────────────
+  document.getElementById('btn-buscar').addEventListener('click', buscar);
+
+  let dadosAtivos = null;
+  let tabAtiva = 'saida';
+
+  async function buscar() {
+    const empresaId = document.getElementById('sel-empresa').value;
+    const comp = document.getElementById('sel-comp').value;
+    if (!empresaId || !comp) {
+      alert('Selecione empresa e competência.');
+      return;
+    }
+
+    document.getElementById('estado-inicial').style.display = 'none';
+    document.getElementById('carregando').style.display = 'block';
+    document.getElementById('summary').style.display = 'none';
+    document.getElementById('tabs').style.display = 'none';
+    document.getElementById('painel-saida').style.display = 'none';
+    document.getElementById('painel-entrada').style.display = 'none';
+    document.getElementById('btn-buscar').disabled = true;
+
+    try {
+      const r = await fetch('/v1/notas?empresa_id=' + empresaId + '&competencia=' + comp, { headers: headers() });
+      if (!r.ok) {
+        const b = await r.json().catch(() => ({}));
+        throw new Error(b.erro || 'HTTP ' + r.status);
+      }
+      dadosAtivos = await r.json();
+      renderizar();
+    } catch (err) {
+      document.getElementById('carregando').style.display = 'none';
+      document.getElementById('estado-inicial').style.display = 'block';
+      document.getElementById('estado-inicial').innerHTML =
+        '<strong>Erro ao buscar notas</strong><p>' + err.message + '</p>';
+    } finally {
+      document.getElementById('btn-buscar').disabled = false;
+    }
+  }
+
+  // ── Render ─────────────────────────────────────────
+  function renderizar() {
+    const d = dadosAtivos;
+    document.getElementById('carregando').style.display = 'none';
+
+    // Summary
+    const rs = d.resumo.saida, re = d.resumo.entrada;
+    const totalCanc = rs.canceladas + re.canceladas;
+    document.getElementById('s-docs').textContent = rs.ativos + ' doc' + (rs.ativos !== 1 ? 's' : '');
+    document.getElementById('s-valor').textContent = 'R$ ' + fmt(rs.valor_liquido) + ' líquido';
+    document.getElementById('e-docs').textContent = re.ativos + ' doc' + (re.ativos !== 1 ? 's' : '');
+    document.getElementById('e-valor').textContent = 'R$ ' + fmt(re.valor_bruto) + ' bruto';
+    document.getElementById('c-docs').textContent = totalCanc + ' doc' + (totalCanc !== 1 ? 's' : '');
+    document.getElementById('summary').style.display = '';
+    document.getElementById('tabs').style.display = '';
+
+    renderTabela('saida', d.saida, 'body-saida', 'foot-saida', 'count-saida', 'chk-canc-saida');
+    renderTabela('entrada', d.entrada, 'body-entrada', 'foot-entrada', 'count-entrada', 'chk-canc-entrada');
+    mostrarTab(tabAtiva);
+  }
+
+  function renderTabela(tipo, notas, bodyId, footId, countId, chkId) {
+    const tbody = document.getElementById(bodyId);
+    const tfoot = document.getElementById(footId);
+    const chk   = document.getElementById(chkId);
+    const count = document.getElementById(countId);
+
+    function refazer() {
+      const mostrarCanc = chk.checked;
+      const visiveis = mostrarCanc ? notas : notas.filter(function (n) { return !n.cancelada; });
+      tbody.innerHTML = '';
+
+      if (visiveis.length === 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="10" style="text-align:center;padding:32px;color:var(--fg-2)">Nenhuma nota</td>';
+        tbody.appendChild(tr);
+        tfoot.innerHTML = '';
+        count.textContent = '0 notas';
+        return;
+      }
+
+      let somaBruto = 0, somaLiq = 0, somaIss = 0, somaIrrf = 0, somaIcms = 0;
+
+      visiveis.forEach(function (n) {
+        const tr = document.createElement('tr');
+        if (n.cancelada) tr.classList.add('cancelada');
+        const bruto = parseFloat(n.valor_bruto) || 0;
+        const liq   = parseFloat(n.valor_liquido) || 0;
+        const iss   = parseFloat(n.valor_iss) || 0;
+        const irrf  = parseFloat(n.ret_irrf) || 0;
+        const icms  = parseFloat(n.icms_credito) || 0;
+
+        if (!n.cancelada) { somaBruto += bruto; somaLiq += liq; somaIss += iss; somaIrrf += irrf; somaIcms += icms; }
+
+        const status = n.cancelada
+          ? '<span class="badge badge-canc">Cancelada</span>'
+          : '<span class="badge badge-ok">Normal</span>';
+
+        const contraparte = tipo === 'saida'
+          ? (n.nome_tomador || '—')
+          : (n.nome_emitente || '—');
+        const cnpj = tipo === 'saida'
+          ? formatCnpj(n.cnpj_tomador || '')
+          : formatCnpj(n.cnpj_emitente || '');
+
+        const acoes = n.cancelada
+          ? '<td class="acoes"><button class="btn-act btn-act-rest" data-id="' + n.id + '" data-act="restaurar">Restaurar</button>' +
+            '<button class="btn-act btn-act-del" data-id="' + n.id + '" data-act="excluir">Excluir</button></td>'
+          : '<td class="acoes"><button class="btn-act btn-act-edit" data-id="' + n.id + '" data-act="editar">Editar</button>' +
+            '<button class="btn-act btn-act-canc" data-id="' + n.id + '" data-act="cancelar">Cancelar</button></td>';
+
+        if (tipo === 'saida') {
+          tr.innerHTML =
+            '<td>' + (n.numero || '—') + '</td>' +
+            '<td><span class="badge badge-tipo">' + (n.tipo_doc || '').toUpperCase() + '</span></td>' +
+            '<td>' + fmtData(n.data_emissao) + '</td>' +
+            '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + contraparte + '">' + contraparte + '</td>' +
+            '<td class="mono">' + cnpj + '</td>' +
+            '<td class="num val-bruto">' + fmtR(bruto) + '</td>' +
+            '<td class="num">' + (iss > 0 ? fmtR(iss) : '—') +
+              (n.iss_retido ? ' <span class="badge badge-canc">retido</span>' : '') + '</td>' +
+            '<td class="num">' + (irrf > 0 ? fmtR(irrf) : '—') + '</td>' +
+            '<td class="num">' + fmtR(liq) + '</td>' +
+            '<td>' + status + '</td>' + acoes;
+        } else {
+          tr.innerHTML =
+            '<td>' + (n.numero || '—') + '</td>' +
+            '<td><span class="badge badge-tipo">' + (n.tipo_doc || '').toUpperCase() + '</span></td>' +
+            '<td>' + fmtData(n.data_emissao) + '</td>' +
+            '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + contraparte + '">' + contraparte + '</td>' +
+            '<td class="mono">' + cnpj + '</td>' +
+            '<td class="num val-bruto">' + fmtR(bruto) + '</td>' +
+            '<td class="num">' + (icms > 0 ? fmtR(icms) : '—') + '</td>' +
+            '<td class="num">' + fmtR(liq) + '</td>' +
+            '<td>' + status + '</td>' + acoes;
+        }
+
+        tbody.appendChild(tr);
+      });
+
+      // Rodapé com totais (somente ativos)
+      const ativos = visiveis.filter(function (n) { return !n.cancelada; });
+      const canceladas = visiveis.filter(function (n) { return n.cancelada; });
+      const comIssRet = ativos.filter(function (n) { return n.iss_retido; });
+      const somaIssRet = comIssRet.reduce(function (s, n) { return s + (parseFloat(n.valor_iss) || 0); }, 0);
+      count.textContent = visiveis.length + ' nota' + (visiveis.length !== 1 ? 's' : '') +
+        ' (' + ativos.length + ' ativas' + (canceladas.length > 0 ? ', ' + canceladas.length + ' canceladas' : '') + ')' +
+        (comIssRet.length > 0 ? ' — ISS retido: ' + fmtR(somaIssRet) + ' em ' + comIssRet.length + ' nota(s)' : '');
+
+      if (tipo === 'saida') {
+        tfoot.innerHTML =
+          '<tr>' +
+          '<td colspan="5">Totais (excl. canceladas)</td>' +
+          '<td class="num">' + fmtR(somaBruto) + '</td>' +
+          '<td class="num">' + fmtR(somaIss) + '</td>' +
+          '<td class="num">' + fmtR(somaIrrf) + '</td>' +
+          '<td class="num">' + fmtR(somaLiq) + '</td>' +
+          '<td></td><td></td>' +
+          '</tr>';
+      } else {
+        tfoot.innerHTML =
+          '<tr>' +
+          '<td colspan="5">Totais (excl. canceladas)</td>' +
+          '<td class="num">' + fmtR(somaBruto) + '</td>' +
+          '<td class="num">' + fmtR(somaIcms) + '</td>' +
+          '<td class="num">' + fmtR(somaLiq) + '</td>' +
+          '<td></td><td></td>' +
+          '</tr>';
+      }
+    }
+
+    refazer();
+    chk.onchange = refazer;
+  }
+
+  // ── Tabs ───────────────────────────────────────────
+  document.querySelectorAll('.tab').forEach(function (btn) {
+    btn.addEventListener('click', function () { mostrarTab(btn.dataset.tab); });
+  });
+
+  function mostrarTab(tab) {
+    tabAtiva = tab;
+    document.querySelectorAll('.tab').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    document.getElementById('painel-saida').style.display  = tab === 'saida'  ? '' : 'none';
+    document.getElementById('painel-entrada').style.display = tab === 'entrada' ? '' : 'none';
+  }
+
+  // ── Formatters ─────────────────────────────────────
+  function fmt(n) {
+    return parseFloat(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function fmtR(n) { return 'R$ ' + fmt(n); }
+  function fmtData(s) {
+    if (!s) return '—';
+    const d = new Date(s);
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+  }
+  function formatCnpj(s) {
+    if (!s) return '—';
+    const c = s.replace(/\D/g, '');
+    if (c.length === 14) return c.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+    if (c.length === 11) return c.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    return s;
+  }
+
+  // ── Nova Nota ──────────────────────────────────────
+  document.getElementById('btn-nova-nota').addEventListener('click', function() {
+    abrirModalNota(null);
+  });
+
+  // ── Delegação: cliques nas ações da tabela ──────────
+  document.getElementById('painel-saida').addEventListener('click',  function(e) { handleAcao(e); });
+  document.getElementById('painel-entrada').addEventListener('click', function(e) { handleAcao(e); });
+
+  function handleAcao(e) {
+    const btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    const id  = Number(btn.dataset.id);
+    const act = btn.dataset.act;
+    if (act === 'editar')    abrirModalNota(id);
+    if (act === 'cancelar')  softDelete(id, false);
+    if (act === 'restaurar') softDelete(id, true);
+    if (act === 'excluir')   confirmarExclusao(id);
+  }
+
+  // ── Soft delete / restaurar ─────────────────────────
+  async function softDelete(id, restaurar) {
+    try {
+      if (restaurar) {
+        const r = await fetch('/v1/notas/' + id, {
+          method: 'PATCH', headers: headers(),
+          body: JSON.stringify({ cancelada: false })
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        toast('Nota restaurada', 'ok');
+      } else {
+        const r = await fetch('/v1/notas/' + id, {
+          method: 'DELETE', headers: headers()
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        toast('Nota cancelada', 'ok');
+      }
+      await buscar();
+    } catch(e) { toast('Erro: ' + e.message, 'err'); }
+  }
+
+  // ── Confirmar exclusão física ───────────────────────
+  let _pendingDelId = null;
+  function confirmarExclusao(id) {
+    _pendingDelId = id;
+    document.getElementById('modal-del').style.display = 'flex';
+  }
+  document.getElementById('btn-del-cancel').addEventListener('click', function() {
+    document.getElementById('modal-del').style.display = 'none';
+  });
+  document.getElementById('btn-del-confirm').addEventListener('click', async function() {
+    document.getElementById('modal-del').style.display = 'none';
+    if (!_pendingDelId) return;
+    try {
+      const r = await fetch('/v1/notas/' + _pendingDelId + '?excluir=true', {
+        method: 'DELETE', headers: headers()
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      toast('Nota excluída permanentemente', 'ok');
+      await buscar();
+    } catch(e) { toast('Erro: ' + e.message, 'err'); }
+  });
+
+  // ── Modal de edição / criação ───────────────────────
+  let _editandoId = null;
+
+  function abrirModalNota(id) {
+    _editandoId = id;
+    document.getElementById('modal-nota-titulo').textContent = id ? 'Editar Nota' : 'Nova Nota';
+    document.getElementById('btn-mn-save').textContent = id ? 'Salvar alterações' : 'Criar nota';
+
+    // Preenche campos padrão
+    const comp = document.getElementById('sel-comp').value;
+    const hoje = comp ? comp + '-01' : new Date().toISOString().slice(0, 10);
+
+    if (id) {
+      // Busca a nota nos dados já carregados
+      const todas = (dadosAtivos ? [...dadosAtivos.saida, ...dadosAtivos.entrada, ...dadosAtivos.outros] : []);
+      const n = todas.find(function(x) { return x.id === id; });
+      if (n) {
+        document.getElementById('mn-tipo').value     = n.tipo_doc || 'manual';
+        document.getElementById('mn-natureza').value = n.natureza || 'servico_prestado';
+        document.getElementById('mn-numero').value   = n.numero || '';
+        document.getElementById('mn-data').value     = n.data_emissao ? n.data_emissao.slice(0, 10) : '';
+        document.getElementById('mn-bruto').value    = parseFloat(n.valor_bruto) || 0;
+        document.getElementById('mn-deducoes').value = parseFloat(n.valor_deducoes) || 0;
+        document.getElementById('mn-liquido').value  = parseFloat(n.valor_liquido) || 0;
+        document.getElementById('mn-cfop').value     = n.cfop || '';
+        document.getElementById('mn-nome-contraparte').value = n.nome_tomador || n.nome_emitente || '';
+        document.getElementById('mn-cnpj-contraparte').value = formatCnpj(n.cnpj_tomador || n.cnpj_emitente || '');
+        document.getElementById('mn-iss').value      = parseFloat(n.valor_iss) || 0;
+        document.getElementById('mn-iss-retido').checked = !!n.iss_retido;
+        document.getElementById('mn-pis').value      = parseFloat(n.ret_pis) || 0;
+        document.getElementById('mn-cofins').value   = parseFloat(n.ret_cofins) || 0;
+        document.getElementById('mn-csll').value     = parseFloat(n.ret_csll) || 0;
+        document.getElementById('mn-irrf').value     = parseFloat(n.ret_irrf) || 0;
+        document.getElementById('mn-inss').value     = parseFloat(n.ret_inss) || 0;
+        document.getElementById('mn-cancelada').value = n.cancelada ? 'true' : 'false';
+      }
+    } else {
+      document.getElementById('mn-tipo').value      = 'manual';
+      document.getElementById('mn-natureza').value  = 'servico_prestado';
+      document.getElementById('mn-numero').value    = '';
+      document.getElementById('mn-data').value      = hoje;
+      document.getElementById('mn-bruto').value     = '';
+      document.getElementById('mn-deducoes').value  = '0';
+      document.getElementById('mn-liquido').value   = '';
+      document.getElementById('mn-cfop').value      = '';
+      document.getElementById('mn-nome-contraparte').value = '';
+      document.getElementById('mn-cnpj-contraparte').value = '';
+      document.getElementById('mn-iss').value       = '0';
+      document.getElementById('mn-iss-retido').checked = false;
+      document.getElementById('mn-pis').value       = '0';
+      document.getElementById('mn-cofins').value    = '0';
+      document.getElementById('mn-csll').value      = '0';
+      document.getElementById('mn-irrf').value      = '0';
+      document.getElementById('mn-inss').value      = '0';
+      document.getElementById('mn-cancelada').value = 'false';
+    }
+
+    document.getElementById('modal-nota').style.display = 'flex';
+    setTimeout(function() { document.getElementById('mn-numero').focus(); }, 50);
+  }
+
+  document.getElementById('btn-mn-cancel').addEventListener('click', function() {
+    document.getElementById('modal-nota').style.display = 'none';
+  });
+  document.getElementById('modal-nota').addEventListener('click', function(e) {
+    if (e.target === document.getElementById('modal-nota'))
+      document.getElementById('modal-nota').style.display = 'none';
+  });
+
+  // Auto-calcular líquido
+  ['mn-bruto', 'mn-deducoes'].forEach(function(id) {
+    document.getElementById(id).addEventListener('input', function() {
+      const b = parseFloat(document.getElementById('mn-bruto').value) || 0;
+      const d = parseFloat(document.getElementById('mn-deducoes').value) || 0;
+      document.getElementById('mn-liquido').value = (b - d).toFixed(2);
+    });
+  });
+
+  document.getElementById('btn-mn-save').addEventListener('click', async function() {
+    const btn = document.getElementById('btn-mn-save');
+    btn.disabled = true;
+
+    const empresaId = Number(document.getElementById('sel-empresa').value);
+    const comp      = document.getElementById('sel-comp').value;
+    const natureza  = document.getElementById('mn-natureza').value;
+
+    // Monta payload — natureza tem campos específicos de contraparte
+    const isSaida = natureza === 'servico_prestado' || natureza === 'venda';
+    const cnpjCp  = document.getElementById('mn-cnpj-contraparte').value.replace(/\D/g, '');
+    const nomeCp  = document.getElementById('mn-nome-contraparte').value.trim();
+
+    const payload = {
+      tipo_doc:      document.getElementById('mn-tipo').value,
+      natureza,
+      numero:        document.getElementById('mn-numero').value.trim() || null,
+      data_emissao:  document.getElementById('mn-data').value,
+      valor_bruto:   parseFloat(document.getElementById('mn-bruto').value)    || 0,
+      valor_deducoes:parseFloat(document.getElementById('mn-deducoes').value) || 0,
+      valor_liquido: parseFloat(document.getElementById('mn-liquido').value)  || 0,
+      cfop:          document.getElementById('mn-cfop').value.trim() || null,
+      iss_retido:    document.getElementById('mn-iss-retido').checked,
+      valor_iss:     parseFloat(document.getElementById('mn-iss').value)    || 0,
+      ret_pis:       parseFloat(document.getElementById('mn-pis').value)    || 0,
+      ret_cofins:    parseFloat(document.getElementById('mn-cofins').value) || 0,
+      ret_csll:      parseFloat(document.getElementById('mn-csll').value)   || 0,
+      ret_irrf:      parseFloat(document.getElementById('mn-irrf').value)   || 0,
+      ret_inss:      parseFloat(document.getElementById('mn-inss').value)   || 0,
+      cancelada:     document.getElementById('mn-cancelada').value === 'true',
+    };
+
+    if (isSaida) { payload.cnpj_tomador = cnpjCp || null; payload.nome_tomador = nomeCp || null; }
+    else         { payload.cnpj_emitente = cnpjCp || null; payload.nome_emitente = nomeCp || null; }
+
+    try {
+      let r;
+      if (_editandoId) {
+        r = await fetch('/v1/notas/' + _editandoId, {
+          method: 'PATCH', headers: headers(), body: JSON.stringify(payload)
+        });
+      } else {
+        payload.empresa_id  = empresaId;
+        payload.competencia = comp;
+        r = await fetch('/v1/notas', {
+          method: 'POST', headers: headers(), body: JSON.stringify(payload)
+        });
+      }
+      if (!r.ok) { const b = await r.json().catch(()=>({})); throw new Error(b.erro || 'HTTP ' + r.status); }
+      document.getElementById('modal-nota').style.display = 'none';
+      toast(_editandoId ? 'Nota atualizada' : 'Nota criada', 'ok');
+      await buscar();
+    } catch(e) {
+      toast('Erro: ' + e.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // Habilita "Nova Nota" após selecionar empresa+competência
+  function atualizarBtnNova() {
+    const ok = document.getElementById('sel-empresa').value && document.getElementById('sel-comp').value;
+    document.getElementById('btn-nova-nota').disabled = !ok;
+    document.getElementById('btn-excluir-mes').disabled = !ok;
+    document.getElementById('btn-importar-xml').disabled = !document.getElementById('sel-empresa').value;
+  }
+
+  // ── Importar XML avulso ────────────────────────────
+  document.getElementById('btn-importar-xml').addEventListener('click', function() {
+    document.getElementById('inp-xml').click();
+  });
+  document.getElementById('inp-xml').addEventListener('change', async function() {
+    const inp = this;
+    const files = Array.from(inp.files || []);
+    inp.value = '';
+    if (!files.length) return;
+    const empresaId = document.getElementById('sel-empresa').value;
+    const btn = document.getElementById('btn-importar-xml');
+    btn.disabled = true; btn.textContent = 'Importando...';
+    try {
+      const xmls = await Promise.all(files.map(async function(f) { return { nome: f.name, conteudo: await f.text() }; }));
+      const r = await fetch('/v1/notas/importar-xml', {
+        method: 'POST', headers: headers(), body: JSON.stringify({ empresa_id: Number(empresaId), xmls: xmls })
+      });
+      const d = await r.json().catch(function() { return {}; });
+      if (!r.ok) throw new Error(d.erro || 'HTTP ' + r.status);
+
+      const comp = document.getElementById('sel-comp').value;
+      const linhas = d.resultados.map(function(x) {
+        if (x.status === 'erro') return '✗ ' + x.arquivo + ': ' + x.erro;
+        return (x.status === 'importada' ? '✓ ' : '= ') + 'Nº ' + x.numero + ' ' + (x.emitente || '') +
+          ' — ' + fmtR(x.valor) + ' — competência ' + x.competencia +
+          (x.status === 'duplicada' ? ' (já existia)' : '') +
+          (x.competencia !== comp ? '  ⚠ fora da competência exibida' : '');
+      });
+      alert('Importadas: ' + d.importadas + ' | Já existiam: ' + d.duplicadas + ' | Erros: ' + d.erros + '\n\n' + linhas.join('\n'));
+      if (comp) await buscar();
+    } catch(e) {
+      toast('Erro ao importar: ' + e.message, 'err');
+    } finally {
+      btn.textContent = 'Importar XML';
+      atualizarBtnNova();
+    }
+  });
+
+  let _confirmaMes = false;
+  document.getElementById('btn-excluir-mes').addEventListener('click', async function() {
+    const btn = this;
+    if (!_confirmaMes) {
+      _confirmaMes = true;
+      btn.textContent = 'Clique de novo para confirmar';
+      setTimeout(function() { _confirmaMes = false; btn.textContent = 'Excluir todas do mês'; }, 4000);
+      return;
+    }
+    _confirmaMes = false;
+    btn.textContent = 'Excluir todas do mês';
+    const empresaId = document.getElementById('sel-empresa').value;
+    const comp = document.getElementById('sel-comp').value;
+    try {
+      const r = await fetch('/v1/notas?empresa_id=' + empresaId + '&competencia=' + comp, {
+        method: 'DELETE', headers: headers()
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      toast(d.excluidas + ' nota(s) excluída(s). Agora recapture no painel.', 'ok');
+      await buscar();
+    } catch(e) { toast('Erro: ' + e.message, 'err'); }
+  });
+  document.getElementById('sel-empresa').addEventListener('change', atualizarBtnNova);
+  document.getElementById('sel-comp').addEventListener('change', atualizarBtnNova);
+})();
+</script>
+</body>
+</html>

@@ -147,6 +147,8 @@ body {
 .ap-lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-2); font-weight: 500; }
 .ap-val { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--accent); }
 .card-note { font-size: 11px; color: var(--fg-2); margin-top: 8px; padding: 7px 10px; background: var(--surface-2); border-radius: 6px; word-break: break-word; }
+.card-actions { display: flex; gap: 7px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.card-actions .btn { font-size: 12px; padding: 5px 12px; }
 
 /* Log */
 .log-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); max-height: 220px; overflow-y: auto; }
@@ -160,6 +162,26 @@ body {
 /* Skeleton */
 .sk { background: var(--surface-2); border-radius: 6px; animation: pulse 1s ease-in-out infinite alternate; }
 @keyframes pulse { to { opacity: .3; } }
+
+/* Modal */
+.modal-bg {
+  position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.modal-box {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 28px 24px; width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 14px;
+}
+.modal-title { font-size: 16px; font-weight: 600; }
+.modal-sub { font-size: 12px; color: var(--fg-2); margin-top: -8px; }
+.modal-box textarea {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  width: 100%; height: 120px; padding: 10px; border: 1px solid var(--border);
+  border-radius: 7px; background: var(--surface-2); color: var(--fg); resize: vertical;
+}
+.modal-box textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.btn-warn { background: var(--warn-s); color: var(--warn); border-color: transparent; font-weight: 500; }
 
 /* Toast */
 #toast {
@@ -194,6 +216,22 @@ body {
   </div>
 </div>
 
+<!-- MODAL RENOVAR TOKEN -->
+<div id="modal-token" class="modal-bg" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">Renovar Token Qyon</div>
+    <div class="modal-sub">Cole o JSON completo copiado de developer.qyon.com após fazer login com sua conta</div>
+    <div class="field">
+      <label>JSON OAuth2 (access_token + refresh_token)</label>
+      <textarea id="token-json" placeholder='{"access_token":"eyJ...","refresh_token":"Ruj...","token_type":"Bearer",...}'></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-token-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="btn-token-save">Salvar Token</button>
+    </div>
+  </div>
+</div>
+
 <!-- APP -->
 <div id="app">
   <div id="toast"></div>
@@ -212,6 +250,9 @@ body {
           <span class="spin"></span><span>Executar Apuração</span>
         </button>
         <button class="btn btn-ghost" id="btn-reload" title="Atualizar">↻</button>
+        <a class="btn btn-ghost" href="/notas.html" title="Conferência de Notas">📋 Notas</a>
+        <a class="btn btn-ghost" href="/apuracao.html" title="Memória de Cálculo">🧮 Cálculo</a>
+        <button class="btn btn-ghost btn-warn" id="btn-token" title="Renovar Token Qyon">🔑 Token</button>
         <button class="btn-logout" id="btn-logout">Sair</button>
       </div>
     </div>
@@ -231,7 +272,8 @@ body {
 
 <script>
 (function () {
-  // ── Auth ──────────────────────────────────────────
+  // Declarações antecipadas para evitar temporal dead zone com let
+  let logs = [];
   let apiKey = '';
   try { apiKey = localStorage.getItem('chc_api_key') || ''; } catch(e) {}
 
@@ -289,7 +331,6 @@ body {
   }
 
   // ── Log ──────────────────────────────────────────
-  let logs = [];
   function addLog(msg, type = 'info') {
     logs.unshift({ ts: ts(), msg, type });
     if (logs.length > 60) logs.length = 60;
@@ -372,6 +413,14 @@ body {
         </div>
         <div class="stages">${chip('Captura', cap)}${chip('Apuração', apu)}</div>
         ${notasHtml}${apHtml}${note}
+        <div class="card-actions">
+          <button class="btn btn-ghost btn-card-cap" data-cnpj="${h(e.cnpj)}" data-nome="${h(e.nome)}">
+            <span class="spin dark"></span><span>Capturar</span>
+          </button>
+          <button class="btn btn-primary btn-card-apu" data-cnpj="${h(e.cnpj)}" data-nome="${h(e.nome)}">
+            <span class="spin"></span><span>Apurar</span>
+          </button>
+        </div>
       </div>`;
     }).join('');
   }
@@ -438,6 +487,16 @@ body {
     const comp = getComp();
     addLog(`Apuração iniciada — ${comp}…`, 'info');
     try {
+      // Libera Fase 2 automaticamente (409 = já liberada, ok seguir)
+      const lib = await fetch('/v1/fechamento/liberar', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ competencia: comp, responsavel: 'Carlos Chagas' })
+      });
+      if (!lib.ok && lib.status !== 409) {
+        const b = await lib.json().catch(() => ({}));
+        throw new Error(b.erro || `Falha ao liberar Fase 2: HTTP ${lib.status}`);
+      }
+
       const r = await fetch('/v1/apuracao/executar', {
         method: 'POST', headers: headers(), body: JSON.stringify({ competencia: comp })
       });
@@ -448,6 +507,102 @@ body {
       addLog(`Erro na apuração: ${e.message}`, 'err'); toast('Erro na apuração', 'err');
     } finally { setBtn('btn-apurar', false); }
   }
+
+  // ── Captura / Apuração por empresa ───────────────
+  document.getElementById('cards').addEventListener('click', async function(evt) {
+    const btnCap = evt.target.closest('.btn-card-cap');
+    const btnApu = evt.target.closest('.btn-card-apu');
+    if (!btnCap && !btnApu) return;
+
+    const btn = btnCap || btnApu;
+    const cnpj = btn.dataset.cnpj;
+    const nome = btn.dataset.nome;
+    const comp = getComp();
+    const isCap = !!btnCap;
+
+    btn.disabled = true;
+    btn.classList.add('loading');
+    addLog(`${isCap ? 'Captura' : 'Apuração'} iniciada para ${nome} — ${comp}…`, 'info');
+
+    try {
+      if (isCap) {
+        const r = await fetch('/v1/captura/importar', {
+          method: 'POST', headers: headers(),
+          body: JSON.stringify({ competencia: comp, cnpj })
+        });
+        if (!r.ok) { const b = await r.json().catch(()=>({})); throw new Error(b.erro || `HTTP ${r.status}`); }
+        const d = await r.json();
+        const n = d.resumo?.total_notas_importadas ?? 0;
+        const msg = `Captura ${nome}: ${n} nota(s) importada(s)`;
+        addLog(msg, 'ok'); toast(msg, 'ok');
+      } else {
+        const lib = await fetch('/v1/fechamento/liberar', {
+          method: 'POST', headers: headers(),
+          body: JSON.stringify({ competencia: comp, responsavel: 'Carlos Chagas' })
+        });
+        if (!lib.ok && lib.status !== 409) {
+          const b = await lib.json().catch(()=>({}));
+          throw new Error(b.erro || `Falha ao liberar: HTTP ${lib.status}`);
+        }
+        const r = await fetch('/v1/apuracao/executar', {
+          method: 'POST', headers: headers(),
+          body: JSON.stringify({ competencia: comp, cnpj })
+        });
+        if (!r.ok) { const b = await r.json().catch(()=>({})); throw new Error(b.erro || `HTTP ${r.status}`); }
+        const d = await r.json();
+        const emp = d.empresas?.[0];
+        const msg = `Apuração ${nome}: ${emp?.status ?? 'concluída'}${emp?.motivo ? ' — ' + emp.motivo : ''}`;
+        addLog(msg, emp?.status === 'retida' ? 'err' : 'ok');
+        toast(msg.substring(0, 60), emp?.status === 'retida' ? 'err' : 'ok');
+      }
+      await loadStatus();
+    } catch(e) {
+      addLog(`Erro: ${e.message}`, 'err'); toast('Erro: ' + e.message, 'err');
+    } finally {
+      btn.disabled = false; btn.classList.remove('loading');
+    }
+  });
+
+  // ── Renovar Token Qyon ───────────────────────────
+  function openTokenModal() {
+    document.getElementById('token-json').value = '';
+    document.getElementById('modal-token').style.display = 'flex';
+    setTimeout(() => document.getElementById('token-json').focus(), 50);
+  }
+  function closeTokenModal() { document.getElementById('modal-token').style.display = 'none'; }
+
+  async function saveToken() {
+    const raw = document.getElementById('token-json').value.trim();
+    if (!raw) { toast('Cole o JSON OAuth2', 'err'); return; }
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { toast('JSON inválido — verifique o formato', 'err'); return; }
+    const jwt = parsed.access_token;
+    const refreshToken = parsed.refresh_token;
+    if (!jwt || !refreshToken) {
+      toast('JSON deve conter access_token e refresh_token', 'err'); return;
+    }
+    setBtn('btn-token-save', true);
+    try {
+      const r = await fetch('/v1/admin/qyon-token', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ jwt, refreshToken })
+      });
+      if (!r.ok) { const b = await r.json().catch(()=>({})); throw new Error(b.erro || `HTTP ${r.status}`); }
+      addLog('Token Qyon renovado com sucesso', 'ok');
+      toast('Token atualizado! Pode capturar notas agora.', 'ok');
+      closeTokenModal();
+    } catch(e) {
+      addLog(`Erro ao salvar token: ${e.message}`, 'err');
+      toast('Erro: ' + e.message, 'err');
+    } finally { setBtn('btn-token-save', false); }
+  }
+
+  document.getElementById('btn-token').addEventListener('click', openTokenModal);
+  document.getElementById('btn-token-cancel').addEventListener('click', closeTokenModal);
+  document.getElementById('btn-token-save').addEventListener('click', saveToken);
+  document.getElementById('modal-token').addEventListener('click', e => {
+    if (e.target === document.getElementById('modal-token')) closeTokenModal();
+  });
 
   // ── Eventos ──────────────────────────────────────
   document.getElementById('btn-reload').addEventListener('click', loadStatus);

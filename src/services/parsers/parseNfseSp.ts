@@ -3,7 +3,7 @@
 // Identificação: <ChaveNFe> como primeiro filho de <NFe>
 import { parseStringPromise } from 'xml2js';
 import { ParsedNota } from '../../types/nota';
-import { str, num, cleanDoc, parseDate, extractCnpj } from './helpers';
+import { str, num, cleanDoc, parseDate, extractCnpj, toCompetencia } from './helpers';
 
 export async function parseNfseSp(xml: string): Promise<ParsedNota> {
   const root = await parseStringPromise(xml, {
@@ -24,6 +24,8 @@ export async function parseNfseSp(xml: string): Promise<ParsedNota> {
     `SP-${str(chaveNfe['InscricaoPrestador'])}-${numero}`;
 
   const dataEmissao = parseDate(nfe['DataEmissaoNFe'] ?? nfe['DataEmissao']);
+  // SP: DataFatoGeradorNFe é a competência do serviço
+  const competencia = toCompetencia(nfe['DataFatoGeradorNFe']);
 
   // Prestador
   const prestDoc = (nfe['CPFCNPJPrestador'] ?? {}) as Record<string, unknown>;
@@ -60,6 +62,7 @@ export async function parseNfseSp(xml: string): Promise<ParsedNota> {
     tipoDoc: 'nfse',
     numero,
     dataEmissao,
+    competencia,
     natureza: 'servico_prestado',
     cnpjEmitente,
     nomeEmitente: nomeEmitente || undefined,

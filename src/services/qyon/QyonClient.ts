@@ -1,6 +1,7 @@
 import https from 'https';
 import http from 'http';
 import { TipoDoc } from '../../types/nota';
+import { query as dbQuery } from '../../config/database';
 
 const QYON_BASE_URL = 'https://api-integracao.qyon.info';
 const QYON_TOKEN_URL = 'https://apigw-qyon-authorization-prd.qyon.com/oauth/token';
@@ -47,11 +48,46 @@ interface QyonListResponse {
 
 const PAGE_SIZE = 50;
 
-// In-memory JWT — initialised from env, refreshed automatically on 401
+// In-memory tokens — initialised from env, overridden by DB on startup
 let currentJwt: string = process.env['QYON_JWT'] ?? '';
+let currentRefreshToken: string = process.env['QYON_REFRESH_TOKEN'] ?? '';
+
+async function saveTokensToDb(jwt: string, refreshToken: string): Promise<void> {
+  try {
+    await dbQuery(
+      `INSERT INTO config (key, value, updated_at) VALUES ('qyon_jwt', $1, NOW()), ('qyon_refresh_token', $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [jwt, refreshToken]
+    );
+  } catch (err) {
+    console.warn('[qyon] Não foi possível salvar tokens no banco:', err instanceof Error ? err.message : err);
+  }
+}
+
+export async function initQyonTokens(): Promise<void> {
+  try {
+    const res = await dbQuery<{ key: string; value: string }>(
+      `SELECT key, value FROM config WHERE key IN ('qyon_jwt', 'qyon_refresh_token')`
+    );
+    for (const row of res.rows) {
+      if (row.key === 'qyon_jwt' && row.value) currentJwt = row.value;
+      if (row.key === 'qyon_refresh_token' && row.value) currentRefreshToken = row.value;
+    }
+    if (res.rows.length > 0) {
+      console.log('[qyon] Tokens carregados do banco de dados');
+    }
+  } catch (err) {
+    console.warn('[qyon] Tokens do banco não disponíveis, usando env vars:', err instanceof Error ? err.message : err);
+  }
+}
+
+export function setQyonTokens(jwt: string, refreshToken: string): void {
+  currentJwt = jwt;
+  currentRefreshToken = refreshToken;
+}
 
 async function refreshJwt(): Promise<void> {
-  const refreshToken = process.env['QYON_REFRESH_TOKEN'];
+  const refreshToken = currentRefreshToken || process.env['QYON_REFRESH_TOKEN'];
   const clientId     = process.env['QYON_CLIENT_ID'];
   const clientSecret = process.env['QYON_CLIENT_SECRET'];
 
@@ -77,12 +113,19 @@ async function refreshJwt(): Promise<void> {
     throw new Error(`Falha ao renovar JWT Qyon: HTTP ${status} — ${respBody.substring(0, 200)}`);
   }
 
-  const parsed = JSON.parse(respBody) as { access_token?: string };
+  const parsed = JSON.parse(respBody) as { access_token?: string; refresh_token?: string };
   if (!parsed.access_token) {
     throw new Error(`Resposta de refresh sem access_token: ${respBody.substring(0, 200)}`);
   }
 
   currentJwt = parsed.access_token;
+  // Salva novo refresh_token se vier na resposta (tokens rotativos)
+  if (parsed.refresh_token) {
+    currentRefreshToken = parsed.refresh_token;
+    process.env['QYON_REFRESH_TOKEN'] = parsed.refresh_token;
+  }
+  await saveTokensToDb(currentJwt, currentRefreshToken);
+  console.log('[qyon] JWT renovado com sucesso e salvo no banco');
 }
 
 function getAuthHeader(): Record<string, string> {

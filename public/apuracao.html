@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHC-Fiscal — Memória de Cálculo</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #F4F5FB; --surface: #fff; --surface-2: #ECEEF8;
+  --fg: #1A1D30; --fg-2: #606480; --accent: #3549D6; --accent-s: #E5E8FF;
+  --ok: #15803D; --ok-s: #DCFCE7;
+  --warn: #92400E; --warn-s: #FEF3C7;
+  --err: #B91C1C; --err-s: #FEE2E2;
+  --border: #DDE0F0; --r: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+    --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+    --ok: #22C55E; --ok-s: #052E14; --warn: #F59E0B; --warn-s: #1C1102;
+    --err: #F87171; --err-s: #2C0808; --border: #24284A; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+  --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+  --ok: #22C55E; --ok-s: #052E14; --warn: #F59E0B; --warn-s: #1C1102;
+  --err: #F87171; --err-s: #2C0808; --border: #24284A; color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { min-height: 100%; }
+body { font-family: 'IBM Plex Sans', system-ui, sans-serif; background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.5; }
+
+/* Login */
+#login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+.login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 36px 32px; width: 100%; max-width: 360px; }
+.login-logo { color: var(--accent); font-weight: 600; font-size: 16px; margin-bottom: 24px; }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.field label { font-size: 11px; font-weight: 600; color: var(--fg-2); text-transform: uppercase; letter-spacing: .06em; }
+.field input, .field select { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--fg); width: 100%; }
+.field input:focus, .field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.btn-primary { width: 100%; padding: 10px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.btn-primary:hover { opacity: .88; }
+
+/* App */
+#app { display: none; }
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 10; }
+.logo { color: var(--accent); font-weight: 600; font-size: 15px; }
+.page-title { font-weight: 600; font-size: 15px; }
+.sep { color: var(--border); }
+header a.back { margin-left: auto; font-size: 13px; color: var(--fg-2); text-decoration: none; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; }
+header a.back:hover { background: var(--surface-2); }
+
+/* Filters */
+.filters { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.filters .field { margin: 0; min-width: 200px; flex: 1; }
+.btn-buscar { padding: 9px 20px; border: none; border-radius: 7px; background: var(--accent); color: #fff; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; align-self: flex-end; }
+.btn-buscar:hover { opacity: .88; }
+.btn-buscar:disabled { opacity: .5; cursor: default; }
+
+/* Regime badge */
+.regime-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 5px; text-transform: uppercase; letter-spacing: .04em; background: var(--accent-s); color: var(--accent); }
+
+/* Tab nav */
+.tab-nav { display: flex; gap: 2px; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; flex-wrap: wrap; }
+.tab-btn { padding: 10px 18px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; background: none; color: var(--fg-2); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tab-btn:hover { color: var(--fg); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Content */
+.content { padding: 24px; max-width: 900px; }
+
+/* Calc card */
+.calc-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; margin-bottom: 20px; }
+.calc-card-header { padding: 14px 20px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 10px; }
+.calc-rows { }
+.calc-row { display: flex; justify-content: space-between; align-items: center; padding: 11px 20px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.calc-row:last-child { border-bottom: none; }
+.calc-row.total { font-weight: 600; background: var(--surface-2); }
+.calc-row.total .val { color: var(--accent); font-size: 16px; }
+.calc-row.subtotal { font-weight: 500; }
+.calc-row .lbl { color: var(--fg-2); }
+.calc-row .val { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-variant-numeric: tabular-nums; }
+.calc-row .val.ok { color: var(--ok); }
+.calc-row .val.err { color: var(--err); }
+.calc-row .val.zero { color: var(--fg-2); }
+
+/* Alert box */
+.alertas { background: var(--warn-s); border: 1px solid var(--warn); border-radius: var(--r); padding: 14px 18px; margin-bottom: 20px; }
+.alertas-title { font-weight: 600; font-size: 12px; color: var(--warn); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+.alertas ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--warn); }
+.alertas ul li { margin-bottom: 4px; }
+
+/* Empty */
+.empty { padding: 60px 24px; text-align: center; color: var(--fg-2); }
+.empty p { margin-top: 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">◆ CHC-Fiscal</div>
+    <div class="field">
+      <label>Chave de API</label>
+      <input type="password" id="api-key-input" placeholder="Cole a chave aqui" autocomplete="current-password">
+    </div>
+    <button class="btn-primary" id="btn-login">Entrar</button>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <span class="logo">◆ CHC-Fiscal</span>
+    <span class="sep">|</span>
+    <span class="page-title">Memória de Cálculo</span>
+    <a class="back" href="/">← Painel</a>
+  </header>
+
+  <div class="filters">
+    <div class="field">
+      <label>Empresa</label>
+      <select id="sel-empresa"><option value="">Selecione...</option></select>
+    </div>
+    <div class="field">
+      <label>Competência</label>
+      <input type="month" id="sel-comp" value="2026-09">
+    </div>
+    <button class="btn-buscar" id="btn-buscar">Buscar</button>
+  </div>
+
+  <div id="tab-nav" class="tab-nav" style="display:none"></div>
+
+  <div id="main-content">
+    <div id="estado-inicial" class="empty">
+      <strong>Selecione uma empresa e competência</strong>
+      <p>Os cálculos detalhados aparecerão aqui por imposto.</p>
+    </div>
+    <div id="carregando" class="empty" style="display:none"><strong>Carregando...</strong></div>
+    <div id="paineis"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  let apiKey = '';
+  try { apiKey = localStorage.getItem('chc_api_key') || ''; } catch(e) {}
+
+  function headers() { return { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' }; }
+
+  if (apiKey) boot(); else document.getElementById('login-screen').style.display = 'flex';
+
+  document.getElementById('btn-login').addEventListener('click', function () {
+    const k = document.getElementById('api-key-input').value.trim();
+    if (!k) return;
+    apiKey = k;
+    try { localStorage.setItem('chc_api_key', apiKey); } catch(e) {}
+    document.getElementById('login-screen').style.display = 'none';
+    boot();
+  });
+  document.getElementById('api-key-input').addEventListener('keydown', function(e) { if (e.key === 'Enter') document.getElementById('btn-login').click(); });
+
+  function boot() {
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('login-screen').style.display = 'none';
+    carregarEmpresas();
+  }
+
+  async function carregarEmpresas() {
+    try {
+      const r = await fetch('/v1/notas/empresas', { headers: headers() });
+      const list = await r.json();
+      const sel = document.getElementById('sel-empresa');
+      list.forEach(function(e) {
+        const o = document.createElement('option');
+        o.value = e.cnpj; o.dataset.regime = e.regime;
+        o.textContent = e.nome + ' (' + fmtCnpj(e.cnpj) + ')';
+        sel.appendChild(o);
+      });
+    } catch(e) { console.error(e); }
+  }
+
+  document.getElementById('btn-buscar').addEventListener('click', buscar);
+
+  let dadosAp = null;
+  let tabAtiva = '';
+
+  async function buscar() {
+    const sel = document.getElementById('sel-empresa');
+    const cnpj = sel.value;
+    const comp = document.getElementById('sel-comp').value;
+    if (!cnpj || !comp) { alert('Selecione empresa e competência.'); return; }
+
+    document.getElementById('estado-inicial').style.display = 'none';
+    document.getElementById('carregando').style.display = 'block';
+    document.getElementById('tab-nav').style.display = 'none';
+    document.getElementById('paineis').innerHTML = '';
+    document.getElementById('btn-buscar').disabled = true;
+
+    try {
+      const r = await fetch('/v1/apuracao/' + comp + '/' + cnpj, { headers: headers() });
+      if (r.status === 404) throw new Error('Apuração não encontrada para esta empresa e competência. Execute a apuração primeiro.');
+      if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.erro || 'HTTP ' + r.status); }
+      dadosAp = await r.json();
+      renderizar();
+    } catch(err) {
+      document.getElementById('carregando').style.display = 'none';
+      document.getElementById('estado-inicial').style.display = 'block';
+      document.getElementById('estado-inicial').innerHTML = '<strong>Erro</strong><p>' + err.message + '</p>';
+    } finally {
+      document.getElementById('btn-buscar').disabled = false;
+    }
+  }
+
+  function renderizar() {
+    document.getElementById('carregando').style.display = 'none';
+    const d = dadosAp;
+    const mc = d.memoria_calculo || {};
+    const regime = d.regime;
+    const alertas = (mc.resultado && mc.resultado.alertas) || [];
+
+    // Monta abas conforme regime
+    const abas = [];
+    if (regime === 'simples') {
+      abas.push({ id: 'das',       label: 'DAS — Simples Nacional' });
+      abas.push({ id: 'retencoes', label: 'Retenções' });
+    } else {
+      abas.push({ id: 'irpj',      label: 'IRPJ' });
+      abas.push({ id: 'csll',      label: 'CSLL' });
+      abas.push({ id: 'pis',       label: 'PIS' });
+      abas.push({ id: 'cofins',    label: 'COFINS' });
+      abas.push({ id: 'iss',       label: 'ISS' });
+      abas.push({ id: 'retencoes', label: 'Retenções' });
+    }
+    abas.push({ id: 'receita', label: 'Receita' });
+
+    // Tab nav
+    const nav = document.getElementById('tab-nav');
+    nav.innerHTML = '';
+    abas.forEach(function(a) {
+      const btn = document.createElement('button');
+      btn.className = 'tab-btn' + (a.id === (tabAtiva || abas[0].id) ? ' active' : '');
+      btn.textContent = a.label;
+      btn.dataset.tab = a.id;
+      btn.addEventListener('click', function() { mostrarAba(a.id); });
+      nav.appendChild(btn);
+    });
+    nav.style.display = '';
+
+    // Paineis
+    const paineis = document.getElementById('paineis');
+    paineis.innerHTML = '';
+    abas.forEach(function(a) {
+      const div = document.createElement('div');
+      div.id = 'painel-' + a.id;
+      div.style.display = 'none';
+      div.innerHTML = '<div class="content">' + renderAba(a.id, d, mc, alertas) + '</div>';
+      paineis.appendChild(div);
+    });
+
+    tabAtiva = tabAtiva || abas[0].id;
+    mostrarAba(tabAtiva);
+  }
+
+  function mostrarAba(id) {
+    tabAtiva = id;
+    document.querySelectorAll('.tab-btn').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.tab === id);
+    });
+    document.querySelectorAll('#paineis > div').forEach(function(p) {
+      p.style.display = p.id === 'painel-' + id ? '' : 'none';
+    });
+  }
+
+  function renderAba(id, d, mc, alertas) {
+    const res = mc.resultado || {};
+    const ent = mc.entrada || {};
+    let html = '';
+
+    if (alertas.length > 0) {
+      html += '<div class="alertas"><div class="alertas-title">⚠ Alertas</div><ul>' +
+        alertas.map(function(a) { return '<li>' + a + '</li>'; }).join('') + '</ul></div>';
+    }
+
+    if (id === 'receita') {
+      html += card('Receita da Competência', [
+        row('Receita de Serviços',  fmtR(d.receita_servicos  || 0)),
+        row('Receita de Comércio',  fmtR(d.receita_comercio  || 0)),
+        row('Receita de Indústria', fmtR(d.receita_industria || 0)),
+        rowTotal('Receita Total',   fmtR(d.receita_total     || 0)),
+      ]);
+      if (d.regime === 'simples') {
+        html += card('Faturamento Acumulado', [
+          row('RBT12 (12 meses anteriores)', fmtR(d.rbt12 || 0)),
+          row('Folha 12 meses',              fmtR(d.folha_12meses || 0)),
+          row('Fator R',                     pct(res.fator_r || 0)),
+          row('Anexo aplicado',              d.anexo_aplicado || '—'),
+          row('Faixa Simples',               (res.faixa || '—') + 'ª'),
+        ]);
+      }
+      return html;
+    }
+
+    if (id === 'das') {
+      html += card('DAS — Cálculo', [
+        row('Receita bruta do mês', fmtR(ent.receita_bruta_mes || 0)),
+        row('RBT12',                fmtR(d.rbt12 || 0)),
+        row('Fator R',              pct(res.fator_r || 0)),
+        row('Anexo',                d.anexo_aplicado || '—'),
+        row('Faixa',                (res.faixa || '—') + 'ª'),
+        rowSub('Alíquota nominal',    pct(d.aliquota_nominal || 0)),
+        rowSub('Parcela a deduzir',   fmtR(d.parcela_dedutivel || 0)),
+        rowSub('Alíquota efetiva',    pct(d.aliquota_efetiva || 0)),
+        row('DAS bruto',              fmtR(d.das_bruto || 0)),
+        row('Deduções (retenções)',   fmtR(d.das_deducoes || 0), d.das_deducoes > 0 ? 'err' : ''),
+        (res.ded_iss_retido  > 0 ? rowSub('ISS retido pelo tomador', fmtR(res.ded_iss_retido),  'err') : ''),
+        (res.ded_pis         > 0 ? rowSub('PIS retido',              fmtR(res.ded_pis),         'err') : ''),
+        (res.ded_cofins      > 0 ? rowSub('COFINS retido',           fmtR(res.ded_cofins),      'err') : ''),
+        (res.ded_csll        > 0 ? rowSub('CSLL retido',             fmtR(res.ded_csll),        'err') : ''),
+        (res.ded_irrf        > 0 ? rowSub('IRRF retido',             fmtR(res.ded_irrf),        'err') : ''),
+        (res.ded_inss        > 0 ? rowSub('INSS retido',             fmtR(res.ded_inss),        'err') : ''),
+        rowTotal('DAS devido',        fmtR(d.das_devido || 0)),
+      ]);
+      if (d.vencimento_das) {
+        html += card('Vencimento', [ row('DAS vence em', fmtData(d.vencimento_das)) ]);
+      }
+      return html;
+    }
+
+    if (id === 'irpj') {
+      html += card('IRPJ — Lucro Presumido', [
+        row('Receita de Serviços',          fmtR(d.receita_servicos || 0)),
+        row('Receita de Comércio',          fmtR(d.receita_comercio || 0)),
+        row('Presunção Serviços',           pct(ent.presuncao_irpj || 0)),
+        rowSub('Base IRPJ apurada este mês', fmtR(res.base_irpj_mes || 0)),
+        rowSub('Base acumulada trimestre',   fmtR(d.base_irpj || 0)),
+        row('Alíquota IRPJ',               '15%'),
+        rowSub('IRPJ s/ base',             fmtR(res.irpj_base || 0)),
+        row('Adicional IRPJ (>R$60k/trim)', fmtR(d.irpj_adicional || 0), (d.irpj_adicional||0) > 0 ? 'err' : 'zero'),
+        rowTotal('IRPJ devido',            fmtR(d.irpj_devido || 0)),
+      ]);
+      if (d.vencimento_irpj_csll) {
+        html += card('Vencimento', [ row('DARF-IRPJ vence em', fmtData(d.vencimento_irpj_csll)) ]);
+      }
+      return html;
+    }
+
+    if (id === 'csll') {
+      html += card('CSLL — Lucro Presumido', [
+        row('Receita de Serviços',          fmtR(d.receita_servicos || 0)),
+        row('Presunção CSLL (base hosp.)',   pct(ent.presuncao_csll || 0)),
+        rowSub('Base CSLL este mês',        fmtR(res.base_csll_mes || 0)),
+        rowSub('Base acumulada trimestre',  fmtR(d.base_csll || 0)),
+        row('Alíquota CSLL',               '9%'),
+        rowTotal('CSLL devida',            fmtR(d.csll_devida || 0)),
+      ]);
+      if (d.vencimento_irpj_csll) {
+        html += card('Vencimento', [ row('DARF-CSLL vence em', fmtData(d.vencimento_irpj_csll)) ]);
+      }
+      return html;
+    }
+
+    if (id === 'pis') {
+      html += card('PIS — Regime Cumulativo', [
+        row('Receita bruta de serviços',    fmtR(d.receita_servicos || 0)),
+        row('Alíquota PIS cumulativo',     '0,65%'),
+        rowTotal('PIS devido',             fmtR(d.pis_devido || 0)),
+      ]);
+      return html;
+    }
+
+    if (id === 'cofins') {
+      html += card('COFINS — Regime Cumulativo', [
+        row('Receita bruta de serviços',    fmtR(d.receita_servicos || 0)),
+        row('Alíquota COFINS cumulativo',  '3,00%'),
+        rowTotal('COFINS devida',          fmtR(d.cofins_devida || 0)),
+      ]);
+      return html;
+    }
+
+    if (id === 'iss') {
+      html += card('ISS', [
+        row('Receita de Serviços',         fmtR(d.receita_servicos || 0)),
+        row('Alíquota ISS',                pct(ent.aliquota_iss || 0)),
+        rowTotal('ISS devido',             fmtR(d.iss_devido || 0)),
+      ]);
+      return html;
+    }
+
+    if (id === 'retencoes') {
+      const saldoAnt = (typeof d.saldo_ret_anterior === 'string' ? JSON.parse(d.saldo_ret_anterior) : d.saldo_ret_anterior) || {};
+      const saldoProx = (typeof d.saldo_ret_proximo === 'string' ? JSON.parse(d.saldo_ret_proximo) : d.saldo_ret_proximo) || {};
+      html += card('Retenções sofridas na competência', [
+        row('PIS retido',    fmtR(d.ret_pis_total    || 0), (d.ret_pis_total    || 0) > 0 ? 'ok' : 'zero'),
+        row('COFINS retido', fmtR(d.ret_cofins_total || 0), (d.ret_cofins_total || 0) > 0 ? 'ok' : 'zero'),
+        row('CSLL retido',   fmtR(d.ret_csll_total   || 0), (d.ret_csll_total   || 0) > 0 ? 'ok' : 'zero'),
+        row('IRRF retido',   fmtR(d.ret_irrf_total   || 0), (d.ret_irrf_total   || 0) > 0 ? 'ok' : 'zero'),
+        row('INSS retido',   fmtR(d.ret_inss_total   || 0), (d.ret_inss_total   || 0) > 0 ? 'ok' : 'zero'),
+      ]);
+      html += card('Saldo de retenções — anterior ao mês', [
+        row('PIS', fmtR(saldoAnt.pis || 0)), row('COFINS', fmtR(saldoAnt.cofins || 0)),
+        row('CSLL', fmtR(saldoAnt.csll || 0)), row('IRRF', fmtR(saldoAnt.irrf || 0)),
+        row('INSS', fmtR(saldoAnt.inss || 0)),
+      ]);
+      html += card('Saldo de retenções — a carregar para o próximo mês', [
+        row('PIS', fmtR(saldoProx.pis || 0)), row('COFINS', fmtR(saldoProx.cofins || 0)),
+        row('CSLL', fmtR(saldoProx.csll || 0)), row('IRRF', fmtR(saldoProx.irrf || 0)),
+        row('INSS', fmtR(saldoProx.inss || 0)),
+      ]);
+      return html;
+    }
+
+    return '<div class="empty"><p>Sem dados para esta aba.</p></div>';
+  }
+
+  // ── Helpers HTML ───────────────────────────────────
+  function card(title, rows) {
+    return '<div class="calc-card"><div class="calc-card-header">' + title + '</div><div class="calc-rows">' + rows.join('') + '</div></div>';
+  }
+  function row(lbl, val, cls) {
+    return '<div class="calc-row"><span class="lbl">' + lbl + '</span><span class="val ' + (cls||'') + '">' + val + '</span></div>';
+  }
+  function rowSub(lbl, val, cls) {
+    return '<div class="calc-row subtotal"><span class="lbl" style="padding-left:14px;font-size:12px">↳ ' + lbl + '</span><span class="val ' + (cls||'') + '" style="font-size:12px">' + val + '</span></div>';
+  }
+  function rowTotal(lbl, val) {
+    return '<div class="calc-row total"><span>' + lbl + '</span><span class="val">' + val + '</span></div>';
+  }
+
+  // ── Formatters ─────────────────────────────────────
+  function fmt(n) { return parseFloat(n||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function fmtR(n) { return 'R$ ' + fmt(n); }
+  function pct(n) { return parseFloat(n||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + '%'; }
+  function fmtData(s) { if (!s) return '—'; const d = new Date(s); return d.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', timeZone:'UTC' }); }
+  function fmtCnpj(c) { c = (c||'').replace(/\D/g,''); return c.length === 14 ? c.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,'$1.$2.$3/$4-$5') : c; }
+})();
+</script>
+</body>
+</html>

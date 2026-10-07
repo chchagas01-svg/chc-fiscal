@@ -37,6 +37,9 @@ export interface EntradaPresumido {
   // Retenções
   retencoes_mes: SaldoRetencoes;
   saldo_anterior: SaldoRetencoes;
+
+  // Empresas com receita anual > R$5M pagam adicional de IRPJ sobre a base inteira
+  irpj_adicional_sobre_base_total?: boolean;
 }
 
 export interface ResultadoPresumido {
@@ -174,7 +177,18 @@ export function calcularPresumido(entrada: EntradaPresumido): ResultadoOuTravaPr
     baseCsllTrim = r2(entrada.base_csll_acumulada_trim + baseCsll);
 
     irpjBruto = r2(baseIrpjTrim * ALIQ_IRPJ);
-    irpjAdicional = r2(Math.max(0, baseIrpjTrim - LIMITE_ADICIONAL_IRPJ) * ALIQ_IRPJ_ADICIONAL);
+
+    if (entrada.irpj_adicional_sobre_base_total) {
+      // Receita anual > R$5M: adicional de 10% sobre a base integral (sem franquia de R$60k)
+      irpjAdicional = r2(baseIrpjTrim * ALIQ_IRPJ_ADICIONAL);
+      alertas.push(`Adicional de IRPJ: R$ ${irpjAdicional.toFixed(2)} — base integral (receita anual > R$ 5.000.000).`);
+    } else {
+      irpjAdicional = r2(Math.max(0, baseIrpjTrim - LIMITE_ADICIONAL_IRPJ) * ALIQ_IRPJ_ADICIONAL);
+      if (irpjAdicional > 0) {
+        alertas.push(`Adicional de IRPJ: R$ ${irpjAdicional.toFixed(2)} (base trimestral R$ ${baseIrpjTrim.toFixed(2)} > R$ 60.000).`);
+      }
+    }
+
     const irpjTotal = r2(irpjBruto + irpjAdicional);
 
     csllBruta = r2(baseCsllTrim * ALIQ_CSLL);
@@ -187,10 +201,6 @@ export function calcularPresumido(entrada: EntradaPresumido): ResultadoOuTravaPr
     csllDevida = csllFinal;
     spCsll = spCsllLocal;
     spIrrf = spIrrfLocal;
-
-    if (irpjAdicional > 0) {
-      alertas.push(`Adicional de IRPJ: R$ ${irpjAdicional.toFixed(2)} (base trimestral R$ ${baseIrpjTrim.toFixed(2)} > R$ 60.000).`);
-    }
   } else {
     alertas.push(`Mês ${entrada.mes_do_trimestre}/3 do trimestre — IRPJ e CSLL serão calculados no 3º mês.`);
   }

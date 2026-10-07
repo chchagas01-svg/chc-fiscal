@@ -38,6 +38,16 @@ export function parseDate(v: unknown): Date {
   return isNaN(d.getTime()) ? new Date(0) : d;
 }
 
+// Extrai competência YYYY-MM de data ISO (YYYY-MM-DD...) ou brasileira (DD/MM/YYYY)
+export function toCompetencia(v: unknown): string | undefined {
+  const s = str(v).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+  const br = s.match(/^\d{2}\/(\d{2})\/(\d{4})/);
+  if (br) return `${br[2]}-${br[1]}`;
+  return undefined;
+}
+
 // Extrair CNPJ de elemento CpfCnpj ou Cnpj/Cpf
 export function extractCnpj(el: unknown): string {
   if (!el || typeof el !== 'object') return '';

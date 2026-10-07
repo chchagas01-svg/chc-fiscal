@@ -5,9 +5,9 @@ import { query } from '../config/database';
 const router = Router();
 
 // POST /v1/captura/importar
-// Body: { competencia: "YYYY-MM" }
+// Body: { competencia: "YYYY-MM", cnpj?: string | string[] }
 router.post('/importar', async (req: Request, res: Response) => {
-  const { competencia } = req.body as { competencia?: string };
+  const { competencia, cnpj } = req.body as { competencia?: string; cnpj?: string | string[] };
   const comp = Array.isArray(competencia) ? competencia[0] : competencia;
 
   if (!comp || !/^\d{4}-\d{2}$/.test(comp)) {
@@ -15,8 +15,12 @@ router.post('/importar', async (req: Request, res: Response) => {
     return;
   }
 
+  const cnpjs = cnpj
+    ? (Array.isArray(cnpj) ? cnpj : [cnpj]).map(c => c.replace(/\D/g, ''))
+    : undefined;
+
   try {
-    const resultados = await capturar(comp);
+    const resultados = await capturar(comp, cnpjs);
 
     const ok = resultados.filter(r => r.status === 'ok').length;
     const semMovimento = resultados.filter(r => r.status === 'sem_movimento').length;

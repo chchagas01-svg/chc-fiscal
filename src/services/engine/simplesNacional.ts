@@ -9,14 +9,18 @@ export interface SaldoRetencoes {
 }
 
 export interface EntradaSimples {
-  receita_bruta_mes: number;     // Receita bruta da competência (sem deduções)
-  rbt12: number;                 // Receita bruta acumulada 12 meses
-  folha_12meses: number;         // Folha de pagamento acumulada 12 meses (CPP incluído)
-  anexo: AnexoSimples;           // Anexo da empresa (III ou V quando sujeita ao Fator R)
-  retencoes_mes: SaldoRetencoes; // Retenções sofridas nesta competência
-  saldo_anterior: SaldoRetencoes; // Saldo acumulado do mês anterior
-  // ISS específicos
-  iss_retido_tomador: number;    // ISS retido pelo tomador (reduz DAS)
+  receita_bruta_mes: number;      // Total da competência (serviços + comércio)
+  rbt12: number;                  // Receita bruta acumulada 12 meses
+  folha_12meses: number;          // Folha acumulada 12 meses (CPP incluído)
+  anexo: AnexoSimples;            // Anexo principal da empresa
+  retencoes_mes: SaldoRetencoes;
+  saldo_anterior: SaldoRetencoes;
+  iss_retido_tomador: number;     // ISS retido pelo tomador (reduz DAS)
+
+  // Empresa mista: breakdown por atividade para DAS separado por anexo
+  receita_servicos_mes?: number;
+  receita_comercio_mes?: number;
+  anexo_comercio?: AnexoSimples;  // Ex: 'I' para comércio quando empresa tem Anexo III + I
 }
 
 export interface ResultadoSimples {
@@ -35,6 +39,11 @@ export interface ResultadoSimples {
   das_deducoes: number;
   das_devido: number;
 
+  // Empresa mista: breakdown por atividade
+  das_servicos?: number;
+  das_comercio?: number;
+  aliquota_efetiva_comercio?: number;
+
   // Deduções detalhadas
   ded_iss_retido: number;
   ded_pis: number;
@@ -43,10 +52,7 @@ export interface ResultadoSimples {
   ded_irrf: number;
   ded_inss: number;
 
-  // Saldo para o próximo mês
   saldo_proximo: SaldoRetencoes;
-
-  // Alertas
   alertas: string[];
 }
 
@@ -64,7 +70,6 @@ function arredondar2(v: number): number {
 export function calcularSimples(entrada: EntradaSimples): ResultadoOuTrava {
   const alertas: string[] = [];
 
-  // Validações base
   if (entrada.rbt12 <= 0) {
     return { ok: false, trava: { tipo: 'erro_base', mensagem: 'RBT12 não informado ou zero. Necessário para apuração do Simples Nacional.' } };
   }
@@ -75,37 +80,60 @@ export function calcularSimples(entrada: EntradaSimples): ResultadoOuTrava {
     return { ok: false, trava: { tipo: 'limite_excedido', mensagem: `RBT12 (R$ ${entrada.rbt12.toFixed(2)}) excede o limite do Simples Nacional (R$ ${LIMITE_SIMPLES.toFixed(2)}).` } };
   }
 
-  // Fator R — decide se usa Anexo III ou V
+  // Fator R — só comuta III ↔ V se houver dado de folha; sem folha, respeita o anexo cadastrado
   let anexoAplicado = entrada.anexo;
   const fatorR = entrada.rbt12 > 0 ? arredondar2(entrada.folha_12meses / entrada.rbt12) : 0;
 
-  if ((entrada.anexo === 'III' || entrada.anexo === 'V')) {
+  if (entrada.folha_12meses > 0 && (entrada.anexo === 'III' || entrada.anexo === 'V')) {
     if (fatorR >= FATOR_R_MINIMO) {
       anexoAplicado = 'III';
-      if (entrada.anexo === 'V') {
-        alertas.push(`Fator R = ${(fatorR * 100).toFixed(2)}% (≥ 28%): aplicado Anexo III.`);
-      }
+      if (entrada.anexo === 'V') alertas.push(`Fator R = ${(fatorR * 100).toFixed(2)}% (≥ 28%): aplicado Anexo III.`);
     } else {
       anexoAplicado = 'V';
-      if (entrada.anexo === 'III') {
-        alertas.push(`Fator R = ${(fatorR * 100).toFixed(2)}% (< 28%): aplicado Anexo V.`);
-      }
+      if (entrada.anexo === 'III') alertas.push(`Fator R = ${(fatorR * 100).toFixed(2)}% (< 28%): aplicado Anexo V.`);
     }
+  } else if (entrada.folha_12meses === 0 && (entrada.anexo === 'III' || entrada.anexo === 'V')) {
+    alertas.push(`Fator R não calculado — folha não informada. Usando Anexo ${entrada.anexo} conforme cadastro.`);
   }
 
-  // Alíquota efetiva
+  // Alíquota efetiva do anexo principal (serviços)
   const calc = calcularAliquotaEfetiva(anexoAplicado, entrada.rbt12);
   if (!calc) {
-    return { ok: false, trava: { tipo: 'erro_base', mensagem: `Não foi possível localizar faixa do Simples para RBT12 = R$ ${entrada.rbt12.toFixed(2)}.` } };
+    return { ok: false, trava: { tipo: 'erro_base', mensagem: `Faixa não encontrada para Anexo ${anexoAplicado}, RBT12 = R$ ${entrada.rbt12.toFixed(2)}.` } };
   }
 
-  // DAS bruto
-  const dasBruto = arredondar2(entrada.receita_bruta_mes * calc.aliquotaEfetiva);
+  // DAS bruto — empresa mista calcula por atividade; empresa única usa receita total
+  let dasBruto: number;
+  let dasServicos: number | undefined;
+  let dasComercios: number | undefined;
+  let aliqEfetivaCom: number | undefined;
 
-  // Deduções: ISS retido pelo tomador + retenções federais (somadas com saldo anterior)
+  if (
+    entrada.anexo_comercio &&
+    entrada.receita_servicos_mes != null &&
+    entrada.receita_comercio_mes != null
+  ) {
+    const calcCom = calcularAliquotaEfetiva(entrada.anexo_comercio, entrada.rbt12);
+    if (!calcCom) {
+      return { ok: false, trava: { tipo: 'erro_base', mensagem: `Faixa não encontrada para Anexo ${entrada.anexo_comercio} (comércio), RBT12 = R$ ${entrada.rbt12.toFixed(2)}.` } };
+    }
+    dasServicos  = arredondar2(entrada.receita_servicos_mes * calc.aliquotaEfetiva);
+    dasComercios = arredondar2(entrada.receita_comercio_mes * calcCom.aliquotaEfetiva);
+    dasBruto     = arredondar2(dasServicos + dasComercios);
+    aliqEfetivaCom = arredondar2(calcCom.aliquotaEfetiva * 10_000) / 10_000;
+    alertas.push(
+      `Empresa mista — Serviços Anexo ${anexoAplicado} (${(calc.aliquotaEfetiva * 100).toFixed(4)}%): R$ ${dasServicos.toFixed(2)} | ` +
+      `Comércio Anexo ${entrada.anexo_comercio} (${(calcCom.aliquotaEfetiva * 100).toFixed(4)}%): R$ ${dasComercios.toFixed(2)}.`
+    );
+    if (entrada.receita_comercio_mes > 0) {
+      alertas.push(`ICMS: embutido na alíquota do Anexo ${entrada.anexo_comercio}. Verificar ICMS-ST se houver mercadorias com substituição tributária.`);
+    }
+  } else {
+    dasBruto = arredondar2(entrada.receita_bruta_mes * calc.aliquotaEfetiva);
+  }
+
   const dedIssRetido = arredondar2(Math.min(entrada.iss_retido_tomador, dasBruto));
 
-  // Retenções federais: saldo anterior + retenções do mês
   const retencaoTotal = {
     pis:    arredondar2(entrada.saldo_anterior.pis    + entrada.retencoes_mes.pis),
     cofins: arredondar2(entrada.saldo_anterior.cofins + entrada.retencoes_mes.cofins),
@@ -114,10 +142,8 @@ export function calcularSimples(entrada: EntradaSimples): ResultadoOuTrava {
     inss:   arredondar2(entrada.saldo_anterior.inss   + entrada.retencoes_mes.inss),
   };
 
-  // Base disponível para dedução federal (DAS - ISS já deduzido)
   let baseDisponivel = arredondar2(dasBruto - dedIssRetido);
 
-  // Deduções federais — aplicar na ordem: PIS, COFINS, CSLL, IRRF, INSS
   function deduzir(valor: number): { deduzido: number; saldoProximo: number } {
     const deduzido = arredondar2(Math.min(valor, baseDisponivel));
     baseDisponivel = arredondar2(baseDisponivel - deduzido);
@@ -131,12 +157,11 @@ export function calcularSimples(entrada: EntradaSimples): ResultadoOuTrava {
   const { deduzido: dedInss,   saldoProximo: saldoInss   } = deduzir(retencaoTotal.inss);
 
   const dasDeducoes = arredondar2(dedIssRetido + dedPis + dedCofins + dedCsll + dedIrrf + dedInss);
-  const dasDEvido = arredondar2(Math.max(0, dasBruto - dasDeducoes));
+  const dasDEvido   = arredondar2(Math.max(0, dasBruto - dasDeducoes));
 
   if (dasBruto > 0 && dasDEvido < 0) {
     alertas.push('DAS resultou negativo — verificar retenções informadas.');
   }
-
   if (saldoPis + saldoCofins + saldoCsll + saldoIrrf + saldoInss > 0) {
     alertas.push('Retenções excedem o DAS do mês — saldo acumulado para próximo mês.');
   }
@@ -151,10 +176,13 @@ export function calcularSimples(entrada: EntradaSimples): ResultadoOuTrava {
       faixa: calc.faixa,
       aliquota_nominal: calc.aliquotaNominal,
       parcela_dedutivel: calc.parcelaDedutivel,
-      aliquota_efetiva: arredondar2(calc.aliquotaEfetiva * 10_000) / 10_000, // 4 casas
+      aliquota_efetiva: arredondar2(calc.aliquotaEfetiva * 10_000) / 10_000,
       das_bruto: dasBruto,
       das_deducoes: dasDeducoes,
       das_devido: dasDEvido,
+      das_servicos: dasServicos,
+      das_comercio: dasComercios,
+      aliquota_efetiva_comercio: aliqEfetivaCom,
       ded_iss_retido: dedIssRetido,
       ded_pis: dedPis,
       ded_cofins: dedCofins,

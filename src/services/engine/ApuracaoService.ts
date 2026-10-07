@@ -11,13 +11,15 @@ interface EmpresaRow {
   nome: string;
   regime: 'simples' | 'presumido';
   anexo: AnexoSimples | null;
+  anexo_comercio: AnexoSimples | null;
   presuncao_servicos: number | null;
   presuncao_comercio: number | null;
   presuncao_industria: number | null;
   presuncao_irpj: number | null;
   presuncao_csll: number | null;
   aliquota_iss: number | null;
-  folha_12meses_seed: number | null; // seed manual até integração com módulo Folha
+  folha_12meses_seed: number | null;
+  rbt12_seed: number | null;
 }
 
 interface TotaisNotas {
@@ -45,27 +47,39 @@ interface SaldoAnteriorRow {
 
 async function buscarEmpresa(empresaId: number): Promise<EmpresaRow | null> {
   const r = await query<EmpresaRow>(
-    `SELECT id, cnpj, nome, regime, anexo,
+    `SELECT id, cnpj, nome, regime, anexo, anexo_comercio,
             presuncao_servicos, presuncao_comercio, presuncao_industria,
-            presuncao_irpj, presuncao_csll, aliquota_iss, folha_12meses_seed
+            presuncao_irpj, presuncao_csll, aliquota_iss, folha_12meses_seed, rbt12_seed
      FROM empresas WHERE id = $1 AND ativo = true`,
     [empresaId]
   );
   return r.rows[0] ?? null;
 }
 
+async function contarMesesCapturados(empresaId: number, competencia: string): Promise<number> {
+  const r = await query(
+    `SELECT COUNT(DISTINCT competencia)::int AS cnt
+     FROM notas
+     WHERE empresa_id = $1
+       AND competencia < $2
+       AND competencia >= TO_CHAR((TO_DATE($2 || '-01','YYYY-MM-DD') - INTERVAL '12 months'), 'YYYY-MM')`,
+    [empresaId, competencia]
+  );
+  return Number(r.rows[0]?.['cnt'] ?? 0);
+}
+
 async function buscarTotaisNotas(empresaId: number, competencia: string): Promise<TotaisNotas> {
   const r = await query(
     `SELECT
-       COALESCE(SUM(valor_bruto) FILTER (WHERE natureza IN ('servico_prestado','servico_tomado') AND NOT cancelada), 0) AS receita_servicos,
-       COALESCE(SUM(valor_bruto) FILTER (WHERE natureza = 'venda' AND NOT cancelada), 0)                               AS receita_comercio,
+       COALESCE(SUM(valor_bruto) FILTER (WHERE natureza = 'servico_prestado' AND NOT cancelada), 0) AS receita_servicos,
+       COALESCE(SUM(valor_bruto) FILTER (WHERE natureza = 'venda' AND NOT cancelada), 0)            AS receita_comercio,
        COALESCE(SUM(valor_bruto) FILTER (WHERE natureza = 'outro' AND tipo_doc = 'nfe' AND NOT cancelada), 0)          AS receita_industria,
        COALESCE(SUM(ret_pis)    FILTER (WHERE natureza = 'servico_prestado' AND NOT cancelada), 0) AS ret_pis,
        COALESCE(SUM(ret_cofins) FILTER (WHERE natureza = 'servico_prestado' AND NOT cancelada), 0) AS ret_cofins,
        COALESCE(SUM(ret_csll)   FILTER (WHERE natureza = 'servico_prestado' AND NOT cancelada), 0) AS ret_csll,
        COALESCE(SUM(ret_irrf)   FILTER (WHERE natureza = 'servico_prestado' AND NOT cancelada), 0) AS ret_irrf,
        COALESCE(SUM(ret_inss)   FILTER (WHERE natureza = 'servico_prestado' AND NOT cancelada), 0) AS ret_inss,
-       COALESCE(SUM(valor_iss)  FILTER (WHERE iss_retido = true AND NOT cancelada), 0)             AS iss_retido_tomador,
+       COALESCE(SUM(valor_iss)  FILTER (WHERE iss_retido = true AND NOT cancelada AND natureza = 'servico_prestado'), 0) AS iss_retido_tomador,
        COALESCE(SUM(icms_debito)  FILTER (WHERE natureza = 'venda'  AND NOT cancelada), 0)         AS icms_debito,
        COALESCE(SUM(icms_credito) FILTER (WHERE natureza = 'compra' AND NOT cancelada), 0)         AS icms_credito,
        COUNT(*) FILTER (WHERE NOT cancelada)                                                        AS total_notas
@@ -91,14 +105,15 @@ async function buscarTotaisNotas(empresaId: number, competencia: string): Promis
 }
 
 async function buscarRBT12(empresaId: number, competencia: string): Promise<number> {
-  // Soma receitas brutas dos 12 meses anteriores à competência
+  // Soma apenas notas de saída (receita) dos 12 meses anteriores à competência
   const r = await query(
     `SELECT COALESCE(SUM(valor_bruto), 0) AS rbt12
      FROM notas
      WHERE empresa_id = $1
        AND competencia < $2
        AND competencia >= TO_CHAR((TO_DATE($2 || '-01','YYYY-MM-DD') - INTERVAL '12 months'), 'YYYY-MM')
-       AND NOT cancelada`,
+       AND NOT cancelada
+       AND natureza IN ('servico_prestado', 'venda')`,
     [empresaId, competencia]
   );
   return Number(r.rows[0]?.['rbt12'] ?? 0);
@@ -255,24 +270,33 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
   const alertas: string[] = [];
 
   if (empresa.regime === 'simples') {
-    const rbt12 = await buscarRBT12(empresaId, competencia);
-    if (rbt12 === 0 && totais.total_notas > 0) {
+    let rbt12 = await buscarRBT12(empresaId, competencia);
+    const receitaMes = totais.receita_servicos + totais.receita_comercio;
+
+    if (rbt12 === 0 && empresa.rbt12_seed != null && empresa.rbt12_seed > 0) {
+      // Primeiro mês sem histórico de notas: usa o seed fornecido diretamente como RBT12
+      rbt12 = Number(empresa.rbt12_seed);
+      alertas.push(`RBT12: base histórica informada R$ ${Number(empresa.rbt12_seed).toFixed(2)}. A partir do próximo mês acumula automaticamente pelas notas.`);
+    } else if (rbt12 === 0 && receitaMes > 0) {
+      rbt12 = receitaMes * 12;
+      alertas.push('RBT12 histórico zero — usando receita do mês × 12 como base provisória. Importe os meses anteriores para resultado exato.');
+    } else if (rbt12 === 0 && totais.total_notas > 0) {
       alertas.push('RBT12 calculado como zero — pode faltar histórico de meses anteriores. Verifique o cadastro.');
     }
 
-    // Folha: usa seed manual enquanto módulo Folha (Subprojeto 2) não estiver disponível
-    const folha12meses = empresa.folha_12meses_seed != null
-      ? Number(empresa.folha_12meses_seed)
-      : 0;
+    const folha12meses = empresa.folha_12meses_seed != null ? Number(empresa.folha_12meses_seed) : 0;
     if (folha12meses === 0 && (empresa.anexo === 'III' || empresa.anexo === 'V')) {
       alertas.push('folha_12meses_seed não informada — Fator R calculado como 0. Configure em cadastro da empresa para resultado preciso.');
     }
 
     const entrada = {
-      receita_bruta_mes: totais.receita_servicos + totais.receita_comercio,
+      receita_bruta_mes: receitaMes,
+      receita_servicos_mes: totais.receita_servicos,
+      receita_comercio_mes: totais.receita_comercio,
       rbt12,
       folha_12meses: folha12meses,
       anexo: (empresa.anexo ?? 'III') as AnexoSimples,
+      ...(empresa.anexo_comercio ? { anexo_comercio: empresa.anexo_comercio as AnexoSimples } : {}),
       retencoes_mes: retencoesMes,
       saldo_anterior: saldoAnt.saldo_ret_proximo,
       iss_retido_tomador: totais.iss_retido_tomador,
@@ -328,6 +352,12 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
 
     const icmsSaldoAnterior = Number(saldoAnt.icms_saldo_credor ?? 0);
 
+    // Receita anual (12 meses anteriores + mês atual) para verificar limite do adicional IRPJ
+    const rbt12Lp = await buscarRBT12(empresaId, competencia);
+    const receitaAtualLp = totais.receita_servicos + totais.receita_comercio + totais.receita_industria;
+    const receitaAnualLp = rbt12Lp + receitaAtualLp;
+    const irpjAdicionalIntegral = receitaAnualLp > 5_000_000;
+
     const entrada = {
       receita_servicos:    totais.receita_servicos,
       receita_comercio:    totais.receita_comercio,
@@ -346,6 +376,7 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
       icms_creditos_mes:   totais.icms_credito,
       retencoes_mes:       retencoesMes,
       saldo_anterior:      saldoAnt.saldo_ret_proximo,
+      irpj_adicional_sobre_base_total: irpjAdicionalIntegral,
     };
 
     const resultado = calcularPresumido(entrada);
@@ -416,8 +447,8 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
 
   await query(
     `INSERT INTO audit_log (competencia, empresa_id, acao, payload, resultado)
-     VALUES ($1,$2,'apuracao',${JSON.stringify({ regime: empresa.regime })},${JSON.stringify(status)})`,
-    [competencia, empresaId]
+     VALUES ($1,$2,'apuracao',$3,$4)`,
+    [competencia, empresaId, JSON.stringify({ regime: empresa.regime }), status]
   );
 
   return {
@@ -434,15 +465,12 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
 export async function apurar(competencia: string, empresasIds?: number[]): Promise<ResultadoApuracao[]> {
   let ids = empresasIds;
   if (!ids || ids.length === 0) {
-    // Apurar apenas empresas cuja captura está OK e não foram ainda apuradas
-    const r = await query<{ empresa_id: number }>(
-      `SELECT fe.empresa_id FROM fechamentos_estado fe
-       LEFT JOIN apuracoes ap ON ap.empresa_id = fe.empresa_id AND ap.competencia = $1 AND ap.status IN ('rascunho','aprovada')
-       WHERE fe.competencia = $1 AND fe.etapa = 'captura' AND fe.status = 'ok'
-         AND ap.id IS NULL`,
-      [competencia]
+    // Apurar todas as empresas ativas (re-apura se já existir registro)
+    const r = await query<{ id: number }>(
+      `SELECT id FROM empresas WHERE ativo = true ORDER BY nome`,
+      []
     );
-    ids = r.rows.map(row => row.empresa_id);
+    ids = r.rows.map(row => row.id);
   }
 
   const resultados: ResultadoApuracao[] = [];

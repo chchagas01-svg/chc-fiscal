@@ -6,7 +6,11 @@ export interface ParsedNota {
   numero?: string;
   serie?: string;
   dataEmissao: Date;
+  // Competência (YYYY-MM) declarada no documento — NFS-e: dCompet / Competencia / DataFatoGerador.
+  // Define o mês de lançamento; a data de emissão só é usada quando ela não existe.
+  competencia?: string;
   natureza: 'servico_prestado' | 'servico_tomado' | 'venda' | 'compra' | 'transferencia' | 'outro';
+  cfop?: string;
   cnpjEmitente: string;
   nomeEmitente?: string;
   cnpjTomador?: string;

@@ -5,11 +5,12 @@ import { query } from '../config/database';
 const router = Router();
 
 // POST /v1/apuracao/executar
-// Body: { competencia: "YYYY-MM", empresas_ids?: number[] }
+// Body: { competencia: "YYYY-MM", empresas_ids?: number[], cnpj?: string | string[] }
 router.post('/executar', async (req: Request, res: Response) => {
-  const { competencia, empresas_ids } = req.body as {
+  const { competencia, empresas_ids, cnpj } = req.body as {
     competencia?: string;
     empresas_ids?: number[];
+    cnpj?: string | string[];
   };
 
   if (!competencia || !/^\d{4}-\d{2}$/.test(competencia)) {
@@ -30,8 +31,18 @@ router.post('/executar', async (req: Request, res: Response) => {
     return;
   }
 
+  let idsFinais = empresas_ids;
+  if (!idsFinais && cnpj) {
+    const cnpjs = (Array.isArray(cnpj) ? cnpj : [cnpj]).map(c => c.replace(/\D/g, ''));
+    const r = await query<{ id: number }>(
+      `SELECT id FROM empresas WHERE cnpj = ANY($1::text[]) AND ativo = true`,
+      [cnpjs]
+    );
+    idsFinais = r.rows.map(row => row.id);
+  }
+
   try {
-    const resultados = await apurar(competencia, empresas_ids);
+    const resultados = await apurar(competencia, idsFinais);
     const aprovadas = resultados.filter(r => r.status === 'aprovada').length;
     const retidas   = resultados.filter(r => r.status === 'retida').length;
 

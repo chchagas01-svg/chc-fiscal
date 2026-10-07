@@ -1,0 +1,290 @@
+import { Router } from 'express';
+import { query } from '../config/database';
+import { parseXml } from '../services/parsers';
+import { inserirNota, competenciaDaNota } from '../services/captura/CapturaService';
+import { ParsedNota } from '../types/nota';
+
+const router = Router();
+
+// Natureza da nota do ponto de vista da empresa; null se a empresa não participa do documento
+function naturezaParaEmpresa(nota: ParsedNota, cnpjEmpresa: string): ParsedNota['natureza'] | null {
+  const emitente = nota.cnpjEmitente === cnpjEmpresa;
+  const tomador  = nota.cnpjTomador  === cnpjEmpresa;
+  if (!emitente && !tomador) return null;
+  if (nota.tipoDoc === 'cte') return nota.natureza;
+  if (nota.tipoDoc === 'nfse') return emitente ? 'servico_prestado' : 'servico_tomado';
+  return emitente ? nota.natureza : 'compra'; // NF-e emitida pela empresa: parser já usa tpNF
+}
+
+// POST /v1/notas/importar-xml — importa XMLs avulsos (NFS-e/NF-e/CT-e) enviados pelo painel
+// Body: { empresa_id, xmls: [{ nome, conteudo }] }
+// A competência vem do próprio documento (NFS-e: competência declarada; demais: mês de emissão).
+router.post('/importar-xml', async (req, res) => {
+  const { empresa_id, xmls } = req.body as {
+    empresa_id?: number;
+    xmls?: { nome?: string; conteudo?: string }[];
+  };
+  if (!empresa_id || !Array.isArray(xmls) || xmls.length === 0)
+    return res.status(400).json({ erro: 'Campos obrigatórios: empresa_id, xmls[]' });
+
+  const empRes = await query<{ id: number; cnpj: string }>(
+    `SELECT id, cnpj FROM empresas WHERE id = $1`, [Number(empresa_id)]
+  );
+  const empresa = empRes.rows[0];
+  if (!empresa) return res.status(404).json({ erro: 'Empresa não encontrada' });
+  const cnpjEmpresa = empresa.cnpj.replace(/\D/g, '');
+
+  const resultados: Record<string, unknown>[] = [];
+  for (const arq of xmls) {
+    const nome = arq.nome ?? 'xml';
+    try {
+      const notas = await parseXml(String(arq.conteudo ?? '').replace(/^﻿/, ''));
+      for (const nota of notas) {
+        const natureza = naturezaParaEmpresa(nota, cnpjEmpresa);
+        if (!natureza) {
+          resultados.push({ arquivo: nome, numero: nota.numero, status: 'erro',
+            erro: `Empresa não é emitente nem tomadora (emitente ${nota.cnpjEmitente}, tomador ${nota.cnpjTomador ?? '-'})` });
+          continue;
+        }
+        const competencia = competenciaDaNota(nota, new Date().toISOString().substring(0, 7));
+        const inserida = await inserirNota(empresa.id, competencia, { ...nota, natureza });
+        resultados.push({
+          arquivo: nome, numero: nota.numero, emitente: nota.nomeEmitente, valor: nota.valorBruto,
+          natureza, competencia, status: inserida ? 'importada' : 'duplicada',
+        });
+      }
+    } catch (err) {
+      resultados.push({ arquivo: nome, status: 'erro', erro: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return res.json({
+    importadas: resultados.filter(r => r['status'] === 'importada').length,
+    duplicadas: resultados.filter(r => r['status'] === 'duplicada').length,
+    erros:      resultados.filter(r => r['status'] === 'erro').length,
+    resultados,
+  });
+});
+
+// POST /v1/notas/recalcular-competencia — move NFS-e já importadas para a competência declarada no XML
+// Body: { empresa_id?, aplicar?: boolean } — sem aplicar=true apenas lista as divergências
+router.post('/recalcular-competencia', async (req, res) => {
+  const { empresa_id, aplicar } = req.body as { empresa_id?: number; aplicar?: boolean };
+  const params: unknown[] = [];
+  let filtro = '';
+  if (empresa_id) { params.push(Number(empresa_id)); filtro = `AND n.empresa_id = $1`; }
+
+  const r = await query<{ id: number; empresa: string; numero: string; competencia: string; xml_raw: string }>(
+    `SELECT n.id, e.nome AS empresa, n.numero, n.competencia, n.xml_raw
+       FROM notas n JOIN empresas e ON e.id = n.empresa_id
+      WHERE n.tipo_doc = 'nfse' AND n.xml_raw IS NOT NULL ${filtro}`,
+    params
+  );
+
+  const divergentes: Record<string, unknown>[] = [];
+  for (const row of r.rows) {
+    try {
+      const notas = await parseXml(row.xml_raw);
+      const comp = notas[0]?.competencia;
+      if (comp && comp !== row.competencia)
+        divergentes.push({ id: row.id, empresa: row.empresa, numero: row.numero, de: row.competencia, para: comp });
+    } catch { /* XML que não reparseia fica como está */ }
+  }
+
+  if (aplicar) {
+    for (const d of divergentes)
+      await query(`UPDATE notas SET competencia = $2 WHERE id = $1`, [d['id'], d['para']]);
+  }
+  return res.json({ analisadas: r.rows.length, divergentes: divergentes.length, aplicado: Boolean(aplicar), notas: divergentes });
+});
+
+// GET /v1/notas/empresas — lista empresas ativas para o seletor
+router.get('/empresas', async (_req, res) => {
+  const result = await query<{ id: number; nome: string; cnpj: string; regime: string }>(
+    `SELECT id, nome, cnpj, regime FROM empresas WHERE ativo = true ORDER BY nome`
+  );
+  return res.json(result.rows);
+});
+
+// GET /v1/notas?empresa_id=X&competencia=YYYY-MM
+router.get('/', async (req, res) => {
+  const { empresa_id, competencia } = req.query;
+
+  if (!empresa_id || !competencia) {
+    return res.status(400).json({ erro: 'empresa_id e competencia são obrigatórios' });
+  }
+
+  const empRes = await query<{ id: number; nome: string; cnpj: string }>(
+    `SELECT id, nome, cnpj FROM empresas WHERE id = $1`,
+    [Number(empresa_id)]
+  );
+  if (empRes.rows.length === 0) {
+    return res.status(404).json({ erro: 'Empresa não encontrada' });
+  }
+
+  const notasRes = await query<Record<string, unknown>>(
+    `SELECT
+       id, chave_acesso, tipo_doc, numero, serie, data_emissao, natureza,
+       cnpj_emitente, nome_emitente, cnpj_tomador, nome_tomador,
+       valor_bruto, valor_deducoes, valor_liquido,
+       iss_retido, valor_iss,
+       ret_pis, ret_cofins, ret_csll, ret_irrf, ret_inss,
+       icms_debito, icms_credito,
+       cancelada, importado_em
+     FROM notas
+     WHERE empresa_id = $1 AND competencia = $2
+     ORDER BY data_emissao, CAST(NULLIF(regexp_replace(numero, '\\D','','g'), '') AS bigint) NULLS LAST, id`,
+    [Number(empresa_id), String(competencia)]
+  );
+
+  const rows = notasRes.rows;
+  const saida  = rows.filter(n => n.natureza === 'servico_prestado' || n.natureza === 'venda');
+  const entrada = rows.filter(n => n.natureza === 'servico_tomado'  || n.natureza === 'compra');
+  const outros  = rows.filter(n => !saida.includes(n) && !entrada.includes(n));
+
+  const soma = (arr: Record<string, unknown>[], campo: string) =>
+    arr.filter(n => !n['cancelada']).reduce((s, n) => s + parseFloat(String(n[campo] ?? 0)), 0);
+
+  return res.json({
+    empresa:    empRes.rows[0],
+    competencia,
+    resumo: {
+      saida: {
+        total: saida.length,
+        ativos: saida.filter(n => !n['cancelada']).length,
+        canceladas: saida.filter(n => n['cancelada']).length,
+        valor_bruto:   soma(saida, 'valor_bruto'),
+        valor_liquido: soma(saida, 'valor_liquido'),
+      },
+      entrada: {
+        total: entrada.length,
+        ativos: entrada.filter(n => !n['cancelada']).length,
+        canceladas: entrada.filter(n => n['cancelada']).length,
+        valor_bruto:   soma(entrada, 'valor_bruto'),
+        valor_liquido: soma(entrada, 'valor_liquido'),
+      },
+    },
+    saida,
+    entrada,
+    outros,
+  });
+});
+
+// PATCH /v1/notas/:id — atualiza campos de uma nota
+router.patch('/:id', async (req, res) => {
+  const id = Number(req.params['id']);
+  if (!id) return res.status(400).json({ erro: 'ID inválido' });
+
+  const campos: Record<string, unknown> = {};
+  const permitidos = [
+    'numero', 'data_emissao', 'natureza', 'nome_emitente', 'nome_tomador',
+    'valor_bruto', 'valor_deducoes', 'valor_liquido',
+    'iss_retido', 'valor_iss',
+    'ret_pis', 'ret_cofins', 'ret_csll', 'ret_irrf', 'ret_inss',
+    'icms_debito', 'icms_credito', 'cancelada', 'cfop', 'competencia',
+  ] as const;
+
+  if ('competencia' in req.body && !/^\d{4}-\d{2}$/.test(String(req.body.competencia)))
+    return res.status(400).json({ erro: 'competencia deve estar no formato YYYY-MM' });
+
+  for (const k of permitidos) {
+    if (k in req.body) campos[k] = req.body[k];
+  }
+
+  if (Object.keys(campos).length === 0)
+    return res.status(400).json({ erro: 'Nenhum campo válido para atualizar' });
+
+  const sets = Object.keys(campos).map((k, i) => `${k} = $${i + 2}`).join(', ');
+  const vals = Object.values(campos);
+
+  const r = await query(
+    `UPDATE notas SET ${sets} WHERE id = $1 RETURNING id`,
+    [id, ...vals]
+  );
+  if ((r.rowCount ?? 0) === 0) return res.status(404).json({ erro: 'Nota não encontrada' });
+  return res.json({ ok: true, id });
+});
+
+// DELETE /v1/notas/:id — cancela (soft) ou exclui fisicamente
+// Query param: ?excluir=true para exclusão física
+router.delete('/:id', async (req, res) => {
+  const id = Number(req.params['id']);
+  if (!id) return res.status(400).json({ erro: 'ID inválido' });
+
+  if (req.query['excluir'] === 'true') {
+    const r = await query(`DELETE FROM notas WHERE id = $1 RETURNING id`, [id]);
+    if ((r.rowCount ?? 0) === 0) return res.status(404).json({ erro: 'Nota não encontrada' });
+    return res.json({ ok: true, excluida: true, id });
+  }
+
+  const r = await query(
+    `UPDATE notas SET cancelada = true WHERE id = $1 RETURNING id`,
+    [id]
+  );
+  if ((r.rowCount ?? 0) === 0) return res.status(404).json({ erro: 'Nota não encontrada' });
+  return res.json({ ok: true, cancelada: true, id });
+});
+
+// DELETE /v1/notas?empresa_id=X&competencia=YYYY-MM — exclui todas as notas do mês (para recapturar)
+router.delete('/', async (req, res) => {
+  const empresaId = Number(req.query['empresa_id']);
+  const competencia = String(req.query['competencia'] ?? '');
+  if (!empresaId || !/^\d{4}-\d{2}$/.test(competencia))
+    return res.status(400).json({ erro: 'empresa_id e competencia (YYYY-MM) são obrigatórios' });
+
+  const r = await query(
+    `DELETE FROM notas WHERE empresa_id = $1 AND competencia = $2`,
+    [empresaId, competencia]
+  );
+  return res.json({ ok: true, excluidas: r.rowCount ?? 0 });
+});
+
+// POST /v1/notas — cria nota manual
+router.post('/', async (req, res) => {
+  const b = req.body as Record<string, unknown>;
+  const { empresa_id, competencia, natureza, data_emissao, valor_bruto } = b;
+
+  if (!empresa_id || !competencia || !natureza || !data_emissao || valor_bruto == null)
+    return res.status(400).json({ erro: 'Campos obrigatórios: empresa_id, competencia, natureza, data_emissao, valor_bruto' });
+
+  const chave = `MANUAL-${empresa_id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const vBruto  = Number(b['valor_bruto']    ?? 0);
+  const vDed    = Number(b['valor_deducoes'] ?? 0);
+  const vLiq    = Number(b['valor_liquido']  ?? vBruto - vDed);
+
+  const r = await query(
+    `INSERT INTO notas (
+       empresa_id, chave_acesso, tipo_doc, numero, data_emissao, competencia,
+       natureza, cfop,
+       cnpj_emitente, nome_emitente, cnpj_tomador, nome_tomador,
+       valor_bruto, valor_deducoes, valor_liquido,
+       iss_retido, valor_iss,
+       ret_pis, ret_cofins, ret_csll, ret_irrf, ret_inss,
+       icms_debito, icms_credito, cancelada
+     ) VALUES (
+       $1,$2,'manual',$3,$4,$5,
+       $6,$7,
+       $8,$9,$10,$11,
+       $12,$13,$14,
+       $15,$16,
+       $17,$18,$19,$20,$21,
+       $22,$23,false
+     ) RETURNING id`,
+    [
+      Number(empresa_id), chave,
+      b['numero'] ?? null, data_emissao, competencia,
+      natureza, b['cfop'] ?? null,
+      b['cnpj_emitente'] ?? null, b['nome_emitente'] ?? null,
+      b['cnpj_tomador'] ?? null, b['nome_tomador'] ?? null,
+      vBruto, vDed, vLiq,
+      Boolean(b['iss_retido']), Number(b['valor_iss'] ?? 0),
+      Number(b['ret_pis']    ?? 0), Number(b['ret_cofins'] ?? 0),
+      Number(b['ret_csll']   ?? 0), Number(b['ret_irrf']   ?? 0),
+      Number(b['ret_inss']   ?? 0),
+      0, 0,
+    ]
+  );
+  return res.status(201).json({ ok: true, id: r.rows[0]['id'] });
+});
+
+export default router;
