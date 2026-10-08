@@ -14,7 +14,7 @@ function detectRootTag(xml: string): string {
 }
 
 const NFSE_TAGS = new Set([
-  'NFSe', 'Nfse', 'CompNfse', 'ListaNfse',
+  'NFSe', 'Nfse', 'CompNfse', 'ListaNfse', 'ListaNotaFiscal',
   'nfse', 'NFSE',                          // variantes de case
   'nfseProc', 'NfseProc', 'NFSeProc',      // wrappers com proc
   'ConsultarNfseResposta', 'GerarNfseResposta', 'RetornoConsultaNfse',

@@ -99,29 +99,25 @@ async function parseSingleAbrasf(inf: Record<string, unknown>, xml: string): Pro
   };
 }
 
-// Extrai InfNfse de estruturas variadas (Nfse, CompNfse, ListaNfse)
-function extractInfNfse(root: Record<string, unknown>): Record<string, unknown>[] {
-  const nfse = root['Nfse'] ?? root['CompNfse'] ?? root['ListaNfse'] ?? root;
-  const compList = (nfse as Record<string, unknown>)['CompNfse'];
-
-  if (Array.isArray(compList)) {
-    return compList
-      .map((c: unknown) => (c as Record<string, unknown>)['InfNfse'] as Record<string, unknown>)
-      .filter(Boolean);
+// Busca em profundidade por todo nó "InfNfse" na árvore, independente do wrapper usado
+// pelo município (Nfse, CompNfse, ListaNfse, ListaNotaFiscal, lotes aninhados etc.).
+// Para de descer assim que encontra um InfNfse (evita pegar sub-nós indevidos).
+function coletarInfNfse(node: unknown, out: Record<string, unknown>[] = []): Record<string, unknown>[] {
+  if (Array.isArray(node)) {
+    for (const item of node) coletarInfNfse(item, out);
+    return out;
   }
-  if (compList && typeof compList === 'object') {
-    const inf = (compList as Record<string, unknown>)['InfNfse'];
-    return inf ? [inf as Record<string, unknown>] : [];
+  if (node && typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+    if ('InfNfse' in obj) {
+      const inf = obj['InfNfse'];
+      if (Array.isArray(inf)) out.push(...(inf as Record<string, unknown>[]));
+      else if (inf) out.push(inf as Record<string, unknown>);
+      return out;
+    }
+    for (const key of Object.keys(obj)) coletarInfNfse(obj[key], out);
   }
-
-  const inf = (nfse as Record<string, unknown>)['InfNfse'];
-  if (inf) return [inf as Record<string, unknown>];
-
-  // Último recurso: o próprio root tem InfNfse
-  const rootInf = root['InfNfse'];
-  if (rootInf) return [rootInf as Record<string, unknown>];
-
-  return [];
+  return out;
 }
 
 export async function parseNfseAbrasf(xml: string): Promise<ParsedNota[]> {
@@ -131,7 +127,7 @@ export async function parseNfseAbrasf(xml: string): Promise<ParsedNota[]> {
     ignoreAttrs: false,
   });
 
-  const infs = extractInfNfse(root);
+  const infs = coletarInfNfse(root);
   if (infs.length === 0) {
     throw new Error('Nenhuma InfNfse encontrada no XML ABRASF');
   }

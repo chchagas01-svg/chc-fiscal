@@ -1,4 +1,10 @@
 import 'dotenv/config';
+// Faz qualquer erro de um handler async (ex.: query ao banco que rejeita) ser
+// encaminhado ao middleware de erro do Express em vez de virar uma unhandled
+// promise rejection — no Node 24 isso derrubava o processo inteiro, tirando o
+// sistema do ar para todas as empresas até a Railway reiniciar o contêiner.
+// Precisa ser importado antes de registrar qualquer rota.
+import 'express-async-errors';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -46,6 +52,11 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   console.error(err);
   res.status(500).json({ erro: 'Erro interno do servidor' });
 });
+
+// Rede de segurança: nada fora do ciclo de requisição (timers, tarefas em
+// background) deve derrubar o processo. Loga e mantém o servidor no ar.
+process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', err));
+process.on('uncaughtException', (err) => console.error('[uncaughtException]', err));
 
 app.listen(PORT, () => {
   console.log(`CHC-Fiscal rodando na porta ${PORT}`);
