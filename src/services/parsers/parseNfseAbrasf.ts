@@ -2,7 +2,7 @@
 // Suporta também CompNfse e outros wrappers municipais
 import { parseStringPromise } from 'xml2js';
 import { ParsedNota } from '../../types/nota';
-import { str, num, cleanDoc, dig, parseDate, extractCnpj, toCompetencia } from './helpers';
+import { str, num, cleanDoc, dig, parseDate, extractCnpjEmCandidatos, toCompetencia } from './helpers';
 
 async function parseSingleAbrasf(inf: Record<string, unknown>, xml: string): Promise<ParsedNota> {
   const numero = str(inf['Numero']);
@@ -11,21 +11,20 @@ async function parseSingleAbrasf(inf: Record<string, unknown>, xml: string): Pro
     inf['Competencia'] ?? dig(inf, 'DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Competencia')
   );
 
-  // Prestador
+  // Prestador — algumas prefeituras (ex.: Campinas) colocam <Cnpj> direto em
+  // IdentificacaoPrestador, sem o envelope <CpfCnpj> que o leiaute ABRASF padrão prevê.
   const prestador = (inf['PrestadorServico'] ?? inf['Prestador']) as Record<string, unknown> | undefined;
-  const cnpjPrestador = extractCnpj(
-    dig(prestador, 'IdentificacaoPrestador', 'CpfCnpj') ??
-    dig(prestador, 'CpfCnpj') ??
-    {}
+  const identPrestador = dig(prestador, 'IdentificacaoPrestador') as Record<string, unknown> | undefined;
+  const cnpjPrestador = extractCnpjEmCandidatos(
+    dig(identPrestador, 'CpfCnpj'), identPrestador, dig(prestador, 'CpfCnpj'), prestador
   );
   const nomePrestador = str(dig(prestador, 'RazaoSocial') ?? '');
 
-  // Tomador
+  // Tomador — mesma tolerância de leiaute do prestador
   const tomador = (inf['TomadorServico'] ?? inf['Tomador']) as Record<string, unknown> | undefined;
-  const cnpjTomador = extractCnpj(
-    dig(tomador, 'IdentificacaoTomador', 'CpfCnpj') ??
-    dig(tomador, 'CpfCnpj') ??
-    {}
+  const identTomador = dig(tomador, 'IdentificacaoTomador') as Record<string, unknown> | undefined;
+  const cnpjTomador = extractCnpjEmCandidatos(
+    dig(identTomador, 'CpfCnpj'), identTomador, dig(tomador, 'CpfCnpj'), tomador
   );
   const nomeTomador = str(dig(tomador, 'RazaoSocial') ?? '');
 

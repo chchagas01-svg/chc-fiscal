@@ -9,6 +9,13 @@ export function num(v: unknown): number {
   return isNaN(n) ? 0 : n;
 }
 
+// Converte número em formato brasileiro ("5.490,00") — usado para valores extraídos de
+// texto livre (discriminação do serviço), onde não vem no formato XML (ponto decimal).
+export function numBR(v: unknown): number {
+  const n = parseFloat(str(v).replace(/\./g, '').replace(',', '.'));
+  return isNaN(n) ? 0 : n;
+}
+
 export function bool(v: unknown): boolean {
   const s = str(v).trim();
   return s === '1' || s.toLowerCase() === 'true' || s.toLowerCase() === 'sim';
@@ -53,4 +60,16 @@ export function extractCnpj(el: unknown): string {
   if (!el || typeof el !== 'object') return '';
   const o = el as Record<string, unknown>;
   return cleanDoc(o['Cnpj'] ?? o['CNPJ'] ?? o['Cpf'] ?? o['CPF'] ?? '');
+}
+
+// Testa vários nós candidatos e usa o primeiro que resultar em um documento válido.
+// Municípios ABRASF variam onde colocam o CNPJ: algumas prefeituras envolvem em <CpfCnpj>,
+// outras colocam <Cnpj>/<Cpf> direto no bloco de Identificacao — sem isso, a extração falha
+// silenciosamente (o nome sai certo, mas o CNPJ fica vazio).
+export function extractCnpjEmCandidatos(...candidatos: unknown[]): string {
+  for (const c of candidatos) {
+    const doc = extractCnpj(c);
+    if (doc) return doc;
+  }
+  return '';
 }

@@ -3,7 +3,7 @@
 //   2. ABRASF legado (tag PascalCase: <InfNFSe>, <Prestador>, <Servico>)
 import { parseStringPromise } from 'xml2js';
 import { ParsedNota } from '../../types/nota';
-import { str, num, bool, cleanDoc, dig, parseDate, extractCnpj, toCompetencia } from './helpers';
+import { str, num, numBR, bool, cleanDoc, dig, parseDate, extractCnpjEmCandidatos, toCompetencia } from './helpers';
 
 export async function parseNfseNacional(xml: string): Promise<ParsedNota> {
   const root = await parseStringPromise(xml, {
@@ -47,9 +47,8 @@ function parseDfe3(inf: Record<string, unknown>, xml: string): ParsedNota {
 
   // Valores diretamente em <valores> (NFS-e level)
   const valoresNfe = (inf['valores'] ?? {}) as Record<string, unknown>;
-  const valorBase    = num(valoresNfe['vBC']    ?? valoresNfe['vServ'] ?? 0);
-  const valorIss     = num(valoresNfe['vISSQN'] ?? valoresNfe['vISS']  ?? 0);
-  const valorLiquido = num(valoresNfe['vLiq']   ?? valorBase);
+  const valorBase = num(valoresNfe['vBC'] ?? valoresNfe['vServ'] ?? 0);
+  const valorIss  = num(valoresNfe['vISSQN'] ?? valoresNfe['vISS'] ?? 0);
 
   // DPS → infDPS traz tomador, data emissão e valores detalhados
   const dps    = (inf['DPS']    ?? {}) as Record<string, unknown>;
@@ -65,10 +64,20 @@ function parseDfe3(inf: Record<string, unknown>, xml: string): ParsedNota {
   const cnpjTomador = cleanDoc(str(toma['CNPJ'] ?? toma['CPF'] ?? ''));
   const nomeTomador = str(toma['xNome'] ?? '');
 
+  // Operadoras de benefícios (vale-refeição/cartão pré-pago, ex.: Caju) declaram vServ=0 por
+  // regra fiscal (o "serviço" é administrar o crédito) — o valor real só aparece no texto da
+  // discriminação ("Valor total do pedido: R$ X,XX"). Sem esse fallback a nota entra com
+  // valor zerado, escondendo a despesa real do tomador.
+  const xDescServ = str(dig(infDps, 'serv', 'cServ', 'xDescServ') ?? '');
+  const valorPedidoMatch = xDescServ.match(/Valor total do pedido:\s*R\$\s*([\d.,]+)/i);
+  const valorPedidoTexto = valorPedidoMatch ? numBR(valorPedidoMatch[1]) : 0;
+
+  const valorLiquido = num(valoresNfe['vLiq'] ?? valorBase) || valorPedidoTexto;
+
   // Valores detalhados do DPS
   const valoresDps  = (infDps['valores'] ?? {}) as Record<string, unknown>;
   const vServPrest  = (valoresDps['vServPrest'] ?? {}) as Record<string, unknown>;
-  const valorServicos = num(vServPrest['vServ'] ?? 0) || valorBase;
+  const valorServicos = (num(vServPrest['vServ'] ?? 0) || valorBase) || valorPedidoTexto;
 
   // ISS retention — tpRetISSQN: 1=não retido, 2=retido pelo tomador, 3=retido intermediário
   const trib     = (valoresDps['trib']    ?? {}) as Record<string, unknown>;
@@ -151,17 +160,19 @@ function parseAbrasf(inf: Record<string, unknown>, xml: string): ParsedNota {
     inf['Competencia'] ?? dig(inf, 'DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Competencia')
   );
 
+  // Algumas prefeituras (ex.: Campinas) colocam <Cnpj> direto em IdentificacaoPrestador/
+  // IdentificacaoTomador, sem o envelope <CpfCnpj> que o leiaute ABRASF padrão prevê.
   const prestador = (inf['Prestador'] ?? inf['PrestadorServico']) as Record<string, unknown> | undefined;
-  const cnpjPrestador = extractCnpj(
-    dig(prestador, 'CpfCnpj') ?? dig(prestador, 'IdentificacaoPrestador', 'CpfCnpj') ?? {}
+  const identPrestador = dig(prestador, 'IdentificacaoPrestador') as Record<string, unknown> | undefined;
+  const cnpjPrestador = extractCnpjEmCandidatos(
+    dig(identPrestador, 'CpfCnpj'), identPrestador, dig(prestador, 'CpfCnpj'), prestador
   );
   const nomePrestador = str(dig(prestador, 'RazaoSocial') ?? dig(prestador, 'NomeFantasia') ?? '');
 
   const tomador = (inf['Tomador'] ?? inf['TomadorServico']) as Record<string, unknown> | undefined;
-  const cnpjTomador = extractCnpj(
-    dig(tomador, 'IdentificacaoTomador', 'CpfCnpj') ??
-    dig(tomador, 'CpfCnpj') ??
-    {}
+  const identTomador = dig(tomador, 'IdentificacaoTomador') as Record<string, unknown> | undefined;
+  const cnpjTomador = extractCnpjEmCandidatos(
+    dig(identTomador, 'CpfCnpj'), identTomador, dig(tomador, 'CpfCnpj'), tomador
   );
   const nomeTomador = str(dig(tomador, 'RazaoSocial') ?? '');
 

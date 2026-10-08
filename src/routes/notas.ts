@@ -220,6 +220,125 @@ router.post('/reprocessar-retencoes', async (req, res) => {
   return res.json({ analisadas: r.rows.length, alteradas: alteradas.length, aplicado: Boolean(aplicar), notas: alteradas });
 });
 
+// POST /v1/notas/reparsear — relê o XML já salvo com o parser atual e corrige TODOS os campos
+// (emitente, tomador, valores, competência, retenções) — não só retenções como o endpoint acima.
+// Usado para consertar notas corrompidas por bugs antigos de parser (ex.: Prestador/Tomador
+// perdido em layouts municipais que fogem do padrão ABRASF usual).
+// Body: { ids?: number[], empresa_id?, competencia?, aplicar?: boolean }
+// NUNCA altera 'natureza' automaticamente — se o emitente corrigido não bater com o esperado
+// pela natureza atual, a nota entra em 'suspeitas' para revisão manual em vez de ser aplicada.
+router.post('/reparsear', async (req, res) => {
+  const { ids, empresa_id, competencia, aplicar } = req.body as
+    { ids?: number[]; empresa_id?: number; competencia?: string; aplicar?: boolean };
+
+  const conds = [`n.xml_raw IS NOT NULL`];
+  const params: unknown[] = [];
+  if (ids && ids.length > 0) { params.push(ids); conds.push(`n.id = ANY($${params.length}::int[])`); }
+  if (empresa_id)  { params.push(Number(empresa_id)); conds.push(`n.empresa_id = $${params.length}`); }
+  if (competencia) { params.push(String(competencia)); conds.push(`n.competencia = $${params.length}`); }
+
+  const r = await query<Record<string, unknown>>(
+    `SELECT n.*, e.cnpj AS empresa_cnpj, e.nome AS empresa_nome
+       FROM notas n JOIN empresas e ON e.id = n.empresa_id
+      WHERE ${conds.join(' AND ')}`,
+    params
+  );
+
+  const CAMPOS_BASE = [
+    'numero', 'cnpj_emitente', 'nome_emitente', 'cnpj_tomador', 'nome_tomador',
+    'valor_bruto', 'valor_deducoes', 'valor_liquido', 'iss_retido', 'valor_iss', 'competencia',
+  ] as const;
+  const CAMPOS_RETENCAO = ['ret_pis', 'ret_cofins', 'ret_csll', 'ret_irrf', 'ret_inss'] as const;
+
+  const alteradas: Record<string, unknown>[] = [];
+  const suspeitas: Record<string, unknown>[] = [];
+
+  for (const row of r.rows) {
+    let nota: ParsedNota | undefined;
+    try { nota = (await parseXml(String(row['xml_raw'])))[0]; } catch { continue; }
+    if (!nota) continue;
+
+    const cnpjEmpresa = String(row['empresa_cnpj']).replace(/\D/g, '');
+    const naturezaEsperada = naturezaParaEmpresa(nota, cnpjEmpresa);
+    const comp = competenciaDaNota(nota, String(row['competencia']));
+
+    // Retenção conferida manualmente no painel (aba Retenções) fica protegida — só os
+    // demais campos (emitente/tomador/valores/competência) são corrigidos para essas notas.
+    const protegeRetencao = Boolean(row['retencao_manual']);
+    const camposComparados = protegeRetencao ? CAMPOS_BASE : [...CAMPOS_BASE, ...CAMPOS_RETENCAO];
+
+    const novo: Record<string, unknown> = {
+      numero: nota.numero ?? null,
+      cnpj_emitente: nota.cnpjEmitente || null, nome_emitente: nota.nomeEmitente || null,
+      cnpj_tomador: nota.cnpjTomador || null, nome_tomador: nota.nomeTomador || null,
+      valor_bruto: nota.valorBruto, valor_deducoes: nota.valorDeducoes, valor_liquido: nota.valorLiquido,
+      iss_retido: nota.issRetido, valor_iss: nota.valorIss, competencia: comp,
+      ...(protegeRetencao ? {} : {
+        ret_pis: nota.retPis, ret_cofins: nota.retCofins, ret_csll: nota.retCsll,
+        ret_irrf: nota.retIrrf, ret_inss: nota.retInss,
+      }),
+    };
+
+    const diff: Record<string, unknown> = {};
+    for (const c of camposComparados) {
+      const atual = row[c];
+      const igual = typeof novo[c] === 'boolean'
+        ? Boolean(atual) === novo[c]
+        : typeof novo[c] === 'number'
+          ? Math.abs(parseFloat(String(atual ?? 0)) - Number(novo[c])) < 0.005
+          : String(atual ?? '') === String(novo[c] ?? '');
+      if (!igual) diff[c] = { de: atual, para: novo[c] };
+    }
+    if (Object.keys(diff).length === 0) continue;
+
+    const item = {
+      id: row['id'], empresa: row['empresa_nome'], numero_atual: row['numero'],
+      natureza: row['natureza'], cancelada: row['cancelada'], alteracoes: diff,
+    };
+
+    // Já existe outra nota ATIVA com o emitente correto, mesmo número/competência/natureza?
+    // (ex.: bug antigo gravou a nota com emitente vazio e depois uma recaptura trouxe a
+    // versão certa como registro separado — são o mesmo documento, não duas notas)
+    if (!row['cancelada']) {
+      const dup = await query<{ id: number }>(
+        `SELECT id FROM notas
+          WHERE empresa_id = $1 AND tipo_doc = 'nfse' AND numero = $2 AND natureza = $3
+            AND cancelada = false AND id != $4 AND cnpj_emitente = $5
+          LIMIT 1`,
+        [row['empresa_id'], novo['numero'], row['natureza'], row['id'], novo['cnpj_emitente']]
+      );
+      if (dup.rows[0]) {
+        const dupItem = { ...item, status: 'duplicata_de', duplicata_da_nota_id: dup.rows[0].id };
+        suspeitas.push({ ...dupItem, motivo: `Já existe a nota ${dup.rows[0].id} com o emitente correto para este número — esta parece ser uma duplicata corrompida. ${aplicar ? 'Cancelada automaticamente.' : 'Revisar antes de cancelar.'}` });
+        if (aplicar) await query(`UPDATE notas SET cancelada = true WHERE id = $1`, [row['id']]);
+        continue;
+      }
+    }
+
+    // Natureza divergente da esperada pelo emitente/tomador corrigidos → não mexe sozinho
+    if (naturezaEsperada && naturezaEsperada !== row['natureza']) {
+      suspeitas.push({ ...item, natureza_esperada: naturezaEsperada,
+        motivo: `Após corrigir emitente/tomador, a natureza esperada seria '${naturezaEsperada}', mas a nota está como '${row['natureza']}'. Revisar manualmente.` });
+      continue;
+    }
+    if (!naturezaEsperada) {
+      suspeitas.push({ ...item, motivo: 'Empresa não é emitente nem tomadora no XML corrigido — nota pode pertencer a outra empresa.' });
+      continue;
+    }
+
+    alteradas.push(item);
+    if (aplicar) {
+      const sets = camposComparados.map((c, i) => `${c} = $${i + 2}`).join(', ');
+      await query(`UPDATE notas SET ${sets} WHERE id = $1`, [row['id'], ...camposComparados.map(c => novo[c])]);
+    }
+  }
+
+  return res.json({
+    analisadas: r.rows.length, alteradas: alteradas.length, suspeitas: suspeitas.length,
+    aplicado: Boolean(aplicar), notas: alteradas, notas_suspeitas: suspeitas,
+  });
+});
+
 // GET /v1/notas/:id/xml — XML original da nota
 router.get('/:id/xml', async (req, res) => {
   const r = await query<{ numero: string; xml_raw: string | null }>(
