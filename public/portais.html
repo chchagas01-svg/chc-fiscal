@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHC-Fiscal — Portais Municipais</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #F4F5FB; --surface: #fff; --surface-2: #ECEEF8;
+  --fg: #1A1D30; --fg-2: #606480; --accent: #3549D6; --accent-s: #E5E8FF;
+  --ok: #15803D; --ok-s: #DCFCE7;
+  --warn: #92400E; --warn-s: #FEF3C7;
+  --err: #B91C1C; --err-s: #FEE2E2;
+  --border: #DDE0F0; --r: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+    --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+    --ok: #22C55E; --ok-s: #052E14;
+    --warn: #F59E0B; --warn-s: #1C1102;
+    --err: #F87171; --err-s: #2C0808;
+    --border: #24284A; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+  --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+  --ok: #22C55E; --ok-s: #052E14;
+  --warn: #F59E0B; --warn-s: #1C1102;
+  --err: #F87171; --err-s: #2C0808;
+  --border: #24284A; color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { min-height: 100%; }
+body { font-family: 'IBM Plex Sans', system-ui, sans-serif; background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.5; }
+#login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+.login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 36px 32px; width: 100%; max-width: 360px; }
+.login-logo { color: var(--accent); font-weight: 600; font-size: 16px; margin-bottom: 24px; }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.field label { font-size: 11px; font-weight: 600; color: var(--fg-2); text-transform: uppercase; letter-spacing: .06em; }
+.field input, .field select {
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface-2); color: var(--fg); width: 100%;
+}
+.field input:focus, .field select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.btn-primary { padding: 10px 18px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.btn-primary:hover { opacity: .88; }
+.btn-ghost { padding: 9px 16px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--fg); font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+
+#app { display: none; }
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 10; }
+.logo { color: var(--accent); font-weight: 600; font-size: 15px; }
+.page-title { font-weight: 600; font-size: 15px; color: var(--fg); }
+.sep { color: var(--border); }
+header a.back { margin-left: auto; font-size: 13px; color: var(--fg-2); text-decoration: none; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; }
+header a.back:hover { background: var(--surface-2); }
+
+.main { max-width: 780px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 24px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px; }
+.card-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.card-sub { font-size: 12px; color: var(--fg-2); margin-bottom: 18px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.field.full { grid-column: 1 / -1; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+thead th { background: var(--surface-2); padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 600; color: var(--fg-2); text-transform: uppercase; letter-spacing: .05em; }
+tbody tr { border-top: 1px solid var(--border); }
+tbody td { padding: 9px 10px; }
+.badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; }
+.badge-ok { background: var(--ok-s); color: var(--ok); }
+
+.preview-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 12px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow-y: auto; margin-top: 10px; }
+.alert { padding: 10px 14px; border-radius: 7px; font-size: 13px; margin-top: 10px; }
+.alert-ok { background: var(--ok-s); color: var(--ok); }
+.alert-err { background: var(--err-s); color: var(--err); }
+.alert-warn { background: var(--warn-s); color: var(--warn); }
+.cmd-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 12px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; margin-top: 10px; overflow-x: auto; }
+
+#toast { position: fixed; bottom: 20px; right: 20px; z-index: 999; padding: 9px 15px; border-radius: 9px; font-size: 13px; font-weight: 500; opacity: 0; transform: translateY(5px); transition: all .2s; pointer-events: none; }
+#toast.show { opacity: 1; transform: none; }
+#toast.t-ok { background: var(--ok); color: #fff; }
+#toast.t-err { background: var(--err); color: #fff; }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">◆ CHC-Fiscal</div>
+    <div class="field">
+      <label>Chave de API</label>
+      <input type="password" id="api-key-input" placeholder="Cole a chave aqui" autocomplete="current-password">
+    </div>
+    <button class="btn-primary" id="btn-login" style="width:100%">Entrar</button>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <span class="logo">◆ CHC-Fiscal</span>
+    <span class="sep">|</span>
+    <span class="page-title">Portais Municipais</span>
+    <a class="back" href="/">← Painel</a>
+  </header>
+
+  <div class="main">
+    <div class="card">
+      <div class="card-title">Credenciais do portal</div>
+      <div class="card-sub">Guardadas uma vez por empresa. O script de envio local usa isso para preencher o login sozinho — só o captcha fica com você.</div>
+      <div class="grid2">
+        <div class="field">
+          <label>Empresa</label>
+          <select id="f-empresa"><option value="">Selecione...</option></select>
+        </div>
+        <div class="field">
+          <label>Sistema</label>
+          <select id="f-sistema">
+            <option value="campinas_nfse">NFS-e Campinas</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Login (CNPJ de acesso)</label>
+          <input type="text" id="f-login" placeholder="16.622.353/0001-63">
+        </div>
+        <div class="field">
+          <label>Senha</label>
+          <input type="password" id="f-senha" placeholder="••••••••">
+        </div>
+        <div class="field">
+          <label>Inscrição Municipal</label>
+          <input type="text" id="f-im" placeholder="002446014">
+        </div>
+        <div class="field">
+          <label>URL de login</label>
+          <input type="text" id="f-url-login" placeholder="https://novanfse.campinas.sp.gov.br/...">
+        </div>
+        <div class="field full">
+          <label>URL de importação de tomador</label>
+          <input type="text" id="f-url-imp" placeholder="https://novanfse.campinas.sp.gov.br/notafiscal/paginas/importacaotomador/importacaoTomadorList.jsf">
+        </div>
+      </div>
+      <button class="btn-primary" id="btn-salvar" style="margin-top:8px">Salvar credenciais</button>
+      <div id="msg-salvar"></div>
+
+      <table id="tbl-portais" style="display:none">
+        <thead><tr><th>Empresa</th><th>Sistema</th><th>Login</th><th>Insc. Municipal</th><th>Status</th></tr></thead>
+        <tbody id="body-portais"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Gerar arquivo DES (serviços tomados)</div>
+      <div class="card-sub">Exclui automaticamente prestadores do mesmo município (já capturados pela própria prefeitura).</div>
+      <div class="grid2">
+        <div class="field">
+          <label>Empresa</label>
+          <select id="g-empresa"><option value="">Selecione...</option></select>
+        </div>
+        <div class="field">
+          <label>Competência</label>
+          <input type="month" id="g-comp">
+        </div>
+      </div>
+      <button class="btn-primary" id="btn-gerar">Pré-visualizar</button>
+      <button class="btn-ghost" id="btn-baixar">Baixar .txt</button>
+      <div id="resultado-geracao"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Enviar automaticamente (script local)</div>
+      <div class="card-sub">Roda no SEU computador — abre um navegador de verdade, preenche o login sozinho, para no captcha para você clicar, e continua sozinho até confirmar o envio.</div>
+      <div class="cmd-box" id="cmd-envio">cd C:\Users\Home\CHC-Sistema\chc-fiscal
+node scripts/enviar-issqn-campinas.js --empresa=&lt;id&gt; --competencia=AAAA-MM</div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+(function () {
+  let apiKey = '';
+  try { apiKey = localStorage.getItem('chc_api_key') || ''; } catch (e) {}
+  function headers() { return { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' }; }
+  function toast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'show t-' + (type || 'ok');
+    clearTimeout(t._t); t._t = setTimeout(function() { t.className = ''; }, 3500);
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  if (apiKey) { boot(); } else { document.getElementById('login-screen').style.display = 'flex'; }
+  document.getElementById('btn-login').addEventListener('click', function () {
+    const k = document.getElementById('api-key-input').value.trim();
+    if (!k) return;
+    apiKey = k;
+    try { localStorage.setItem('chc_api_key', apiKey); } catch (e) {}
+    document.getElementById('login-screen').style.display = 'none';
+    boot();
+  });
+
+  function boot() {
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('login-screen').style.display = 'none';
+    carregarEmpresas();
+  }
+
+  async function carregarEmpresas() {
+    const r = await fetch('/v1/notas/empresas', { headers: headers() });
+    const lista = await r.json();
+    ['f-empresa', 'g-empresa'].forEach(function(id) {
+      const sel = document.getElementById(id);
+      lista.forEach(function(e) {
+        const opt = document.createElement('option');
+        opt.value = e.id; opt.textContent = e.nome;
+        sel.appendChild(opt);
+      });
+    });
+    carregarPortais();
+  }
+
+  async function carregarPortais() {
+    const empresaId = document.getElementById('f-empresa').value;
+    if (!empresaId) { document.getElementById('tbl-portais').style.display = 'none'; return; }
+    const r = await fetch('/v1/portais?empresa_id=' + empresaId, { headers: headers() });
+    const lista = await r.json();
+    const tbl = document.getElementById('tbl-portais');
+    const body = document.getElementById('body-portais');
+    if (!lista.length) { tbl.style.display = 'none'; return; }
+    tbl.style.display = '';
+    const nomeEmpresa = document.getElementById('f-empresa').selectedOptions[0].textContent;
+    body.innerHTML = lista.map(function(p) {
+      return '<tr><td>' + esc(nomeEmpresa) + '</td><td>' + esc(p.sistema) + '</td><td>' + esc(p.login) + '</td><td>' + esc(p.inscricao_municipal || '—') + '</td>' +
+        '<td><span class="badge badge-ok">' + (p.ativo ? 'ativo' : 'inativo') + '</span></td></tr>';
+    }).join('');
+  }
+  document.getElementById('f-empresa').addEventListener('change', carregarPortais);
+
+  document.getElementById('btn-salvar').addEventListener('click', async function() {
+    const body = {
+      empresa_id: Number(document.getElementById('f-empresa').value),
+      sistema: document.getElementById('f-sistema').value,
+      login: document.getElementById('f-login').value.trim(),
+      senha: document.getElementById('f-senha').value,
+      inscricao_municipal: document.getElementById('f-im').value.trim(),
+      url_login: document.getElementById('f-url-login').value.trim() || undefined,
+      url_importacao: document.getElementById('f-url-imp').value.trim() || undefined,
+    };
+    if (!body.empresa_id || !body.login || !body.senha) { toast('Preencha empresa, login e senha', 'err'); return; }
+    try {
+      const r = await fetch('/v1/portais', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.erro || 'HTTP ' + r.status);
+      toast('Credenciais salvas', 'ok');
+      document.getElementById('f-senha').value = '';
+      carregarPortais();
+    } catch (e) { toast('Erro: ' + e.message, 'err'); }
+  });
+
+  async function gerar(baixar) {
+    const empresaId = document.getElementById('g-empresa').value;
+    const comp = document.getElementById('g-comp').value;
+    if (!empresaId || !comp) { toast('Selecione empresa e competência', 'err'); return; }
+    const out = document.getElementById('resultado-geracao');
+    out.innerHTML = '<p style="color:var(--fg-2);margin-top:10px">Gerando...</p>';
+    try {
+      if (baixar) {
+        const r = await fetch('/v1/portais/campinas/des/' + comp + '/download?empresa_id=' + empresaId, { headers: headers() });
+        if (!r.ok) { const d = await r.json(); throw new Error(d.erro || 'HTTP ' + r.status); }
+        const blob = await r.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = 'des_campinas_' + comp + '.txt'; a.click();
+        out.innerHTML = '<div class="alert alert-ok">Arquivo baixado.</div>';
+        return;
+      }
+      const r = await fetch('/v1/portais/campinas/des/' + comp + '?empresa_id=' + empresaId, { headers: headers() });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.erro || 'HTTP ' + r.status);
+      let html = '<div class="alert ' + (d.faltando_mapeamento.length ? 'alert-warn' : 'alert-ok') + '">' +
+        d.total_notas + ' notas tomadas · ' + d.incluidas + ' incluídas · ' + d.excluidas_mesmo_municipio + ' excluídas (mesmo município)' +
+        (d.faltando_mapeamento.length ? ' · ' + d.faltando_mapeamento.length + ' sem mapeamento de CNAE' : '') + '</div>';
+      if (d.faltando_mapeamento.length) {
+        html += '<div class="preview-box">' + d.faltando_mapeamento.map(function(f) {
+          return 'Nº ' + esc(f.numero) + ' — ' + esc(f.prestador) + ' (item ' + esc(f.item) + ') — sem CNAE cadastrado';
+        }).join('\n') + '</div>';
+      }
+      out.innerHTML = html;
+    } catch (e) {
+      out.innerHTML = '<div class="alert alert-err">Erro: ' + esc(e.message) + '</div>';
+    }
+  }
+  document.getElementById('btn-gerar').addEventListener('click', function() { gerar(false); });
+  document.getElementById('btn-baixar').addEventListener('click', function() { gerar(true); });
+
+  document.getElementById('g-empresa').addEventListener('change', atualizarComando);
+  document.getElementById('g-comp').addEventListener('change', atualizarComando);
+  function atualizarComando() {
+    const id = document.getElementById('g-empresa').value || '<id>';
+    const comp = document.getElementById('g-comp').value || 'AAAA-MM';
+    document.getElementById('cmd-envio').textContent =
+      'cd C:\\Users\\Home\\CHC-Sistema\\chc-fiscal\nnode scripts/enviar-issqn-campinas.js --empresa=' + id + ' --competencia=' + comp;
+  }
+})();
+</script>
+</body>
+</html>

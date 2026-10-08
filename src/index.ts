@@ -17,6 +17,7 @@ import contabilRouter from './routes/contabil';
 import adminRouter from './routes/admin';
 import notasRouter from './routes/notas';
 import obrigacoesRouter from './routes/obrigacoes';
+import portaisRouter from './routes/portais';
 import { initQyonTokens } from './services/qyon/QyonClient';
 
 const app = express();
@@ -41,6 +42,7 @@ app.use('/v1/contabil', contabilRouter);
 app.use('/v1/admin', adminRouter);
 app.use('/v1/notas', notasRouter);
 app.use('/v1/obrigacoes', obrigacoesRouter);
+app.use('/v1/portais', portaisRouter);
 
 // 404 genérico
 app.use((_req, res) => {
