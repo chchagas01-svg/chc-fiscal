@@ -51,8 +51,18 @@ export async function parseNfseSp(xml: string): Promise<ParsedNota> {
   const retIrrf   = num(nfe['ValorIR']     ?? nfe['ValorRetIR']);
   const retPis    = num(nfe['ValorPIS']    ?? nfe['ValorRetPIS']);
   const retCofins = num(nfe['ValorCOFINS'] ?? nfe['ValorRetCOFINS']);
-  const retCsll   = num(nfe['ValorCSLL']   ?? nfe['ValorRetCSLL']);
   const retInss   = num(nfe['ValorINSS']   ?? nfe['ValorRetINSS']);
+  const vCsllCampo = num(nfe['ValorCSLL']  ?? nfe['ValorRetCSLL']);
+
+  // Alguns emissores (Prefeitura SP) gravam em ValorCSLL o CPC inteiro — PIS 0,65% + COFINS 3% +
+  // CSLL 1% = 4,65% — mesmo com PIS/COFINS já informados em separado, duplicando o valor.
+  // A própria nota (Discriminação) soma IR+PIS+COFINS+CSLL(1%) como desconto, não IR+PIS+COFINS+CSLL(4,65%).
+  let retCsll = vCsllCampo;
+  if (valorServicos > 0 && (retPis > 0 || retCofins > 0)) {
+    const candidata = Math.round((vCsllCampo - retPis - retCofins) * 100) / 100;
+    const csllEsperada = Math.round(valorServicos * 0.01 * 100) / 100;
+    if (Math.abs(candidata - csllEsperada) < 0.05) retCsll = candidata;
+  }
 
   const statusNfe = str(nfe['StatusNFe'] ?? '');
   const cancelada = statusNfe === 'C' || statusNfe === 'Cancelada';
