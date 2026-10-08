@@ -39,13 +39,24 @@ router.post('/', async (req, res) => {
   if (!empresa_id || !sistema || !login || !senha)
     return res.status(400).json({ erro: 'Campos obrigatórios: empresa_id, sistema, login, senha' });
 
+  // Campos opcionais: string vazia conta como "não informado" — nunca apaga um valor já salvo.
+  // Em UPDATE, COALESCE(novo, atual) preserva o que já existia quando o campo vem vazio/ausente.
+  const semValor = (v: unknown) => v == null || String(v).trim() === '';
+  const inscricaoMunicipal = semValor(b['inscricao_municipal']) ? null : String(b['inscricao_municipal']).trim();
+  const urlLogin = semValor(b['url_login']) ? null : String(b['url_login']).trim();
+  const urlImportacao = semValor(b['url_importacao']) ? null : String(b['url_importacao']).trim();
+
   const r = await query<{ id: number }>(
     `INSERT INTO portais_municipais (empresa_id, sistema, login, senha, inscricao_municipal, url_login, url_importacao)
      VALUES ($1,$2,$3,$4,$5,$6,$7)
      ON CONFLICT (empresa_id, sistema) DO UPDATE SET
-       login = $3, senha = $4, inscricao_municipal = $5, url_login = $6, url_importacao = $7, ativo = true, atualizado_em = NOW()
+       login = $3, senha = $4,
+       inscricao_municipal = COALESCE($5, portais_municipais.inscricao_municipal),
+       url_login = COALESCE($6, portais_municipais.url_login),
+       url_importacao = COALESCE($7, portais_municipais.url_importacao),
+       ativo = true, atualizado_em = NOW()
      RETURNING id`,
-    [Number(empresa_id), String(sistema), String(login), String(senha), b['inscricao_municipal'] ?? null, b['url_login'] ?? null, b['url_importacao'] ?? null]
+    [Number(empresa_id), String(sistema), String(login), String(senha), inscricaoMunicipal, urlLogin, urlImportacao]
   );
   return res.status(201).json({ ok: true, id: r.rows[0]!.id });
 });

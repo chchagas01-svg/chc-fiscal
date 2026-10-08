@@ -236,8 +236,20 @@ node scripts/enviar-issqn-campinas.js --empresa=&lt;id&gt; --competencia=AAAA-MM
       return '<tr><td>' + esc(nomeEmpresa) + '</td><td>' + esc(p.sistema) + '</td><td>' + esc(p.login) + '</td><td>' + esc(p.inscricao_municipal || '—') + '</td>' +
         '<td><span class="badge badge-ok">' + (p.ativo ? 'ativo' : 'inativo') + '</span></td></tr>';
     }).join('');
+
+    // Preenche o formulário com o que já existe para o sistema selecionado, para que salvar
+    // de novo (ex.: trocar só a senha) não apague os outros campos.
+    const sistemaAtual = document.getElementById('f-sistema').value;
+    const existente = lista.find(function(p) { return p.sistema === sistemaAtual; });
+    if (existente) {
+      document.getElementById('f-login').value = existente.login || '';
+      document.getElementById('f-im').value = existente.inscricao_municipal || '';
+      document.getElementById('f-url-login').value = existente.url_login || '';
+      document.getElementById('f-url-imp').value = existente.url_importacao || '';
+    }
   }
   document.getElementById('f-empresa').addEventListener('change', carregarPortais);
+  document.getElementById('f-sistema').addEventListener('change', carregarPortais);
 
   document.getElementById('btn-salvar').addEventListener('click', async function() {
     const body = {
