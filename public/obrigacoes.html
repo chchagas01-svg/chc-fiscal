@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHC-Fiscal — Checklist Mensal</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #F4F5FB; --surface: #fff; --surface-2: #ECEEF8;
+  --fg: #1A1D30; --fg-2: #606480; --accent: #3549D6; --accent-s: #E5E8FF;
+  --ok: #15803D; --ok-s: #DCFCE7;
+  --warn: #92400E; --warn-s: #FEF3C7;
+  --err: #B91C1C; --err-s: #FEE2E2;
+  --border: #DDE0F0; --r: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+    --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+    --ok: #22C55E; --ok-s: #052E14;
+    --warn: #F59E0B; --warn-s: #1C1102;
+    --err: #F87171; --err-s: #2C0808;
+    --border: #24284A; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+  --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+  --ok: #22C55E; --ok-s: #052E14;
+  --warn: #F59E0B; --warn-s: #1C1102;
+  --err: #F87171; --err-s: #2C0808;
+  --border: #24284A; color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { min-height: 100%; }
+body { font-family: 'IBM Plex Sans', system-ui, sans-serif; background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.5; }
+
+#login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+.login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 36px 32px; width: 100%; max-width: 360px; }
+.login-logo { color: var(--accent); font-weight: 600; font-size: 16px; margin-bottom: 24px; }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.field label { font-size: 11px; font-weight: 600; color: var(--fg-2); text-transform: uppercase; letter-spacing: .06em; }
+.field input, .field select, .field textarea {
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface-2); color: var(--fg); width: 100%;
+}
+.field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.btn-primary { width: 100%; padding: 10px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.btn-primary:hover { opacity: .88; }
+
+#app { display: none; }
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 10; }
+.logo { color: var(--accent); font-weight: 600; font-size: 15px; }
+.page-title { font-weight: 600; font-size: 15px; color: var(--fg); }
+.sep { color: var(--border); }
+header a.back { margin-left: auto; font-size: 13px; color: var(--fg-2); text-decoration: none; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; }
+header a.back:hover { background: var(--surface-2); }
+
+.filters { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.filters .field { margin: 0; min-width: 160px; }
+.filters .field select, .filters .field input { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; }
+.btn-buscar { padding: 9px 20px; border: none; border-radius: 7px; background: var(--accent); color: #fff; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; align-self: flex-end; }
+.btn-buscar:hover { opacity: .88; }
+.btn-nova { padding: 9px 16px; border: none; border-radius: 7px; background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; align-self: flex-end; }
+.btn-nova:hover { background: var(--border); }
+
+.summary { padding: 20px 24px 0; display: flex; gap: 14px; flex-wrap: wrap; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 16px 20px; flex: 1; min-width: 160px; }
+.tile-label { font-size: 11px; font-weight: 600; color: var(--fg-2); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.tile-value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile-sub { font-size: 12px; color: var(--fg-2); margin-top: 2px; }
+.tile.ok .tile-value { color: var(--ok); }
+.tile.warn .tile-value { color: var(--warn); }
+
+.table-wrap { padding: 20px 24px; }
+.tbl-container { overflow-x: auto; border-radius: var(--r); border: 1px solid var(--border); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { background: var(--surface-2); padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; color: var(--fg-2); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+tbody tr { border-top: 1px solid var(--border); transition: background .1s; }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr.concluido td { color: var(--fg-2); }
+tbody tr.concluido td.desc { text-decoration: line-through; }
+tbody tr.atrasado td.dia { color: var(--err); font-weight: 600; }
+tbody td { padding: 10px 12px; vertical-align: middle; color: var(--fg); }
+tbody td.dia { font-family: 'IBM Plex Mono', monospace; font-weight: 600; white-space: nowrap; }
+tbody td.periodo { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--fg-2); white-space: nowrap; }
+.chk { width: 18px; height: 18px; cursor: pointer; accent-color: var(--ok); }
+
+.badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .04em; }
+.badge-ok { background: var(--ok-s); color: var(--ok); }
+.badge-pend { background: var(--warn-s); color: var(--warn); }
+.badge-atraso { background: var(--err-s); color: var(--err); }
+
+.empty { padding: 60px 24px; text-align: center; color: var(--fg-2); }
+.empty p { margin-top: 8px; font-size: 13px; }
+
+.btn-act { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 5px; font-family: inherit; font-size: 11px; font-weight: 500; border: 1px solid transparent; cursor: pointer; white-space: nowrap; line-height: 1.4; background: var(--accent-s); color: var(--accent); }
+.btn-act-del { background: var(--err-s); color: var(--err); }
+.btn-act:hover { opacity: .8; }
+td.acoes { white-space: nowrap; }
+td.acoes .btn-act + .btn-act { margin-left: 4px; }
+
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.modal-title { font-size: 15px; font-weight: 600; }
+.modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.modal-grid .field { margin: 0; }
+.modal-grid .field.full { grid-column: 1 / -1; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.btn-m { padding: 8px 16px; border: none; border-radius: 7px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.btn-m-ghost { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); }
+.btn-m-primary { background: var(--accent); color: #fff; }
+.btn-m-danger { background: var(--err); color: #fff; }
+
+#toast { position: fixed; bottom: 20px; right: 20px; z-index: 999; padding: 9px 15px; border-radius: 9px; font-size: 13px; font-weight: 500; opacity: 0; transform: translateY(5px); transition: all .2s; pointer-events: none; max-width: 300px; }
+#toast.show { opacity: 1; transform: none; }
+#toast.t-ok { background: var(--ok); color: #fff; }
+#toast.t-err { background: var(--err); color: #fff; }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">◆ CHC-Fiscal</div>
+    <div class="field">
+      <label>Chave de API</label>
+      <input type="password" id="api-key-input" placeholder="Cole a chave aqui" autocomplete="current-password">
+    </div>
+    <button class="btn-primary" id="btn-login">Entrar</button>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <span class="logo">◆ CHC-Fiscal</span>
+    <span class="sep">|</span>
+    <span class="page-title">Checklist Mensal</span>
+    <a class="back" href="/">← Painel</a>
+  </header>
+
+  <div class="filters">
+    <div class="field">
+      <label>Mês de processamento</label>
+      <input type="month" id="sel-comp">
+    </div>
+    <button class="btn-buscar" id="btn-buscar">Buscar</button>
+    <button class="btn-nova" id="btn-novo-item">+ Incluir item (só este mês)</button>
+    <button class="btn-nova" id="btn-gerenciar">Gerenciar agenda fixa</button>
+  </div>
+
+  <div class="summary" id="summary" style="display:none">
+    <div class="tile ok">
+      <div class="tile-label">Concluídas</div>
+      <div class="tile-value" id="sm-feitas">—</div>
+    </div>
+    <div class="tile warn">
+      <div class="tile-label">Pendentes</div>
+      <div class="tile-value" id="sm-pendentes">—</div>
+    </div>
+    <div class="tile warn">
+      <div class="tile-label">Atrasadas</div>
+      <div class="tile-value" id="sm-atrasadas">—</div>
+      <div class="tile-sub" id="sm-hoje">—</div>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <div id="estado-inicial" class="empty">
+      <strong>Selecione o mês de processamento</strong>
+      <p>Ex.: para fechar setembro/2026, selecione outubro/2026 — é o mês em que as entregas vencem.</p>
+    </div>
+    <div id="carregando" class="empty" style="display:none"><strong>Carregando...</strong></div>
+
+    <div id="painel-lista" style="display:none">
+      <div class="tbl-container">
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>Dia</th>
+              <th>Obrigação</th>
+              <th>Período de Referência</th>
+              <th>Status</th>
+              <th>Observação</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="body-lista"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: incluir item avulso no mês -->
+  <div id="modal-item" class="modal-bg" style="display:none">
+    <div class="modal-box">
+      <div class="modal-title">Incluir item neste mês</div>
+      <p style="font-size:12px;color:var(--fg-2)">Cria um item avulso só para a competência selecionada. Para alterar a agenda fixa (todos os meses), use "Gerenciar agenda fixa".</p>
+      <div class="modal-grid">
+        <div class="field"><label>Dia do prazo</label><input type="text" id="mi-dia" placeholder="Ex: 12 ou 2 a 6"></div>
+        <div class="field"><label>Período de referência</label><input type="text" id="mi-periodo" placeholder="Ex: Setembro/2026"></div>
+        <div class="field full"><label>Descrição</label><input type="text" id="mi-desc" placeholder="Descrição da obrigação"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-m btn-m-ghost" id="btn-mi-cancel">Cancelar</button>
+        <button class="btn-m btn-m-primary" id="btn-mi-save">Incluir</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: observação -->
+  <div id="modal-obs" class="modal-bg" style="display:none">
+    <div class="modal-box" style="max-width:420px">
+      <div class="modal-title" id="modal-obs-titulo">Observação</div>
+      <div class="field full"><textarea id="mo-texto" rows="4" placeholder="Anotação sobre esta entrega..."></textarea></div>
+      <div class="modal-actions">
+        <button class="btn-m btn-m-ghost" id="btn-mo-cancel">Cancelar</button>
+        <button class="btn-m btn-m-primary" id="btn-mo-save">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: gerenciar agenda fixa (template) -->
+  <div id="modal-agenda" class="modal-bg" style="display:none">
+    <div class="modal-box" style="max-width:760px">
+      <div class="modal-title">Agenda fixa (todos os meses)</div>
+      <p style="font-size:12px;color:var(--fg-2)">Alterações aqui valem para os meses futuros que ainda não geraram checklist. Meses já gerados não mudam.</p>
+      <div class="tbl-container" style="max-height:50vh">
+        <table>
+          <thead><tr><th>Dia</th><th>Descrição</th><th>Referência</th><th></th></tr></thead>
+          <tbody id="body-agenda"></tbody>
+        </table>
+      </div>
+      <div class="modal-grid" style="border-top:1px solid var(--border);padding-top:12px">
+        <div class="field"><label>Dia do prazo (texto)</label><input type="text" id="ma-dia" placeholder="Ex: 12 ou 2 a 6"></div>
+        <div class="field"><label>Dia (nº p/ ordenar)</label><input type="number" id="ma-dia-ord" min="1" max="31" placeholder="Ex: 12"></div>
+        <div class="field full"><label>Descrição</label><input type="text" id="ma-desc" placeholder="Descrição da obrigação"></div>
+        <div class="field">
+          <label>Referência</label>
+          <select id="ma-ref">
+            <option value="1">Mês anterior</option>
+            <option value="2">Mês anterior ao anterior</option>
+            <option value="fixo">Texto fixo (ex.: trimestral)</option>
+          </select>
+        </div>
+        <div class="field"><label>Texto fixo (se aplicável)</label><input type="text" id="ma-fixo" placeholder="Ex: Trimestre ou Mensal" disabled></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-m btn-m-ghost" id="btn-ma-close">Fechar</button>
+        <button class="btn-m btn-m-primary" id="btn-ma-add">+ Incluir na agenda</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+(function () {
+  let apiKey = '';
+  try { apiKey = localStorage.getItem('chc_api_key') || ''; } catch (e) {}
+
+  function headers() { return { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' }; }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function toast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'show t-' + (type || 'ok');
+    clearTimeout(t._t);
+    t._t = setTimeout(function() { t.className = ''; }, 3000);
+  }
+
+  if (apiKey) { boot(); } else { document.getElementById('login-screen').style.display = 'flex'; }
+  document.getElementById('btn-login').addEventListener('click', function () {
+    const k = document.getElementById('api-key-input').value.trim();
+    if (!k) return;
+    apiKey = k;
+    try { localStorage.setItem('chc_api_key', apiKey); } catch (e) {}
+    document.getElementById('login-screen').style.display = 'none';
+    boot();
+  });
+  document.getElementById('api-key-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') document.getElementById('btn-login').click();
+  });
+
+  function boot() {
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('login-screen').style.display = 'none';
+    const hoje = new Date();
+    document.getElementById('sel-comp').value = hoje.toISOString().substring(0, 7);
+    buscar();
+  }
+
+  let dados = null;
+
+  document.getElementById('btn-buscar').addEventListener('click', buscar);
+
+  function diaAtrasado(diaPrazo, comp) {
+    const hoje = new Date();
+    const compAtual = hoje.toISOString().substring(0, 7);
+    if (comp !== compAtual) return comp < compAtual; // mês já passado inteiro conta como atrasado se pendente
+    const diaNum = parseInt(String(diaPrazo).match(/\d+/), 10);
+    return !isNaN(diaNum) && hoje.getDate() > diaNum;
+  }
+
+  async function buscar() {
+    const comp = document.getElementById('sel-comp').value;
+    if (!comp) { alert('Selecione o mês.'); return; }
+    document.getElementById('estado-inicial').style.display = 'none';
+    document.getElementById('carregando').style.display = 'block';
+    document.getElementById('painel-lista').style.display = 'none';
+    document.getElementById('summary').style.display = 'none';
+    try {
+      const r = await fetch('/v1/obrigacoes/checklist/' + comp, { headers: headers() });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      dados = await r.json();
+      renderizar();
+    } catch (e) {
+      document.getElementById('carregando').style.display = 'none';
+      document.getElementById('estado-inicial').style.display = 'block';
+      document.getElementById('estado-inicial').innerHTML = '<strong>Erro ao buscar checklist</strong><p>' + esc(e.message) + '</p>';
+    }
+  }
+
+  function renderizar() {
+    document.getElementById('carregando').style.display = 'none';
+    document.getElementById('painel-lista').style.display = '';
+    document.getElementById('summary').style.display = '';
+
+    const comp = dados.competencia;
+    const itens = dados.itens.slice().sort(function(a, b) {
+      const da = parseInt(String(a.dia_prazo).match(/\d+/), 10) || 0;
+      const db = parseInt(String(b.dia_prazo).match(/\d+/), 10) || 0;
+      return da - db;
+    });
+    const concluidas = itens.filter(function(i) { return i.status === 'concluido'; }).length;
+    const atrasadas = itens.filter(function(i) { return i.status !== 'concluido' && diaAtrasado(i.dia_prazo, comp); }).length;
+    document.getElementById('sm-feitas').textContent = concluidas + ' / ' + itens.length;
+    document.getElementById('sm-pendentes').textContent = String(itens.length - concluidas);
+    document.getElementById('sm-atrasadas').textContent = String(atrasadas);
+    document.getElementById('sm-hoje').textContent = 'hoje: ' + new Date().toLocaleDateString('pt-BR');
+
+    const tbody = document.getElementById('body-lista');
+    tbody.innerHTML = itens.map(function(i) {
+      const atrasado = i.status !== 'concluido' && diaAtrasado(i.dia_prazo, comp);
+      const badge = i.status === 'concluido'
+        ? '<span class="badge badge-ok">concluído</span>'
+        : atrasado ? '<span class="badge badge-atraso">atrasado</span>' : '<span class="badge badge-pend">pendente</span>';
+      return '<tr class="' + (i.status === 'concluido' ? 'concluido' : (atrasado ? 'atrasado' : '')) + '" data-exec="' + i.execucao_id + '">' +
+        '<td><input type="checkbox" class="chk" data-act="baixa" ' + (i.status === 'concluido' ? 'checked' : '') + '></td>' +
+        '<td class="dia">' + esc(i.dia_prazo) + '</td>' +
+        '<td class="desc">' + esc(i.descricao) + '</td>' +
+        '<td class="periodo">' + esc(i.periodo_referencia) + '</td>' +
+        '<td>' + badge + (i.concluido_em ? '<div style="font-size:11px;color:var(--fg-2);margin-top:3px">' + new Date(i.concluido_em).toLocaleString('pt-BR') + '</div>' : '') + '</td>' +
+        '<td style="max-width:220px;font-size:12px;color:var(--fg-2)">' + esc(i.observacao || '') + '</td>' +
+        '<td class="acoes">' +
+          '<button class="btn-act" data-act="obs">Obs.</button>' +
+          '<button class="btn-act btn-act-del" data-act="excluir">Excluir</button>' +
+        '</td></tr>';
+    }).join('') || '<tr><td colspan="7">Nenhum item para esta competência.</td></tr>';
+  }
+
+  document.getElementById('body-lista').addEventListener('click', async function(e) {
+    const tr = e.target.closest('tr[data-exec]');
+    if (!tr) return;
+    const id = tr.dataset.exec;
+    const item = dados.itens.find(function(i) { return String(i.execucao_id) === id; });
+
+    if (e.target.classList.contains('chk')) {
+      const novoStatus = e.target.checked ? 'concluido' : 'pendente';
+      try {
+        const r = await fetch('/v1/obrigacoes/execucoes/' + id, { method: 'PATCH', headers: headers(), body: JSON.stringify({ status: novoStatus }) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        toast(novoStatus === 'concluido' ? 'Marcado como concluído' : 'Reaberto', 'ok');
+        await buscar();
+      } catch (err) { toast('Erro: ' + err.message, 'err'); e.target.checked = !e.target.checked; }
+      return;
+    }
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    if (btn.dataset.act === 'obs') {
+      document.getElementById('modal-obs-titulo').textContent = 'Observação — ' + (item ? item.descricao : '');
+      document.getElementById('mo-texto').value = item ? (item.observacao || '') : '';
+      document.getElementById('modal-obs').dataset.exec = id;
+      document.getElementById('modal-obs').style.display = 'flex';
+    } else if (btn.dataset.act === 'excluir') {
+      if (!confirm('Excluir este item do checklist de ' + dados.competencia + '?')) return;
+      try {
+        const r = await fetch('/v1/obrigacoes/execucoes/' + id, { method: 'DELETE', headers: headers() });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        toast('Item excluído do mês', 'ok');
+        await buscar();
+      } catch (err) { toast('Erro: ' + err.message, 'err'); }
+    }
+  });
+
+  document.getElementById('btn-mo-cancel').addEventListener('click', function() { document.getElementById('modal-obs').style.display = 'none'; });
+  document.getElementById('btn-mo-save').addEventListener('click', async function() {
+    const id = document.getElementById('modal-obs').dataset.exec;
+    try {
+      const r = await fetch('/v1/obrigacoes/execucoes/' + id, { method: 'PATCH', headers: headers(), body: JSON.stringify({ observacao: document.getElementById('mo-texto').value }) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      document.getElementById('modal-obs').style.display = 'none';
+      toast('Observação salva', 'ok');
+      await buscar();
+    } catch (err) { toast('Erro: ' + err.message, 'err'); }
+  });
+
+  // ── Incluir item avulso (só nesta competência) ──────
+  document.getElementById('btn-novo-item').addEventListener('click', function() {
+    document.getElementById('mi-dia').value = '';
+    document.getElementById('mi-periodo').value = '';
+    document.getElementById('mi-desc').value = '';
+    document.getElementById('modal-item').style.display = 'flex';
+  });
+  document.getElementById('btn-mi-cancel').addEventListener('click', function() { document.getElementById('modal-item').style.display = 'none'; });
+  document.getElementById('btn-mi-save').addEventListener('click', async function() {
+    const desc = document.getElementById('mi-desc').value.trim();
+    const dia = document.getElementById('mi-dia').value.trim();
+    const periodo = document.getElementById('mi-periodo').value.trim();
+    if (!desc || !dia) { toast('Preencha dia e descrição', 'err'); return; }
+    try {
+      const r = await fetch('/v1/obrigacoes/checklist/' + dados.competencia + '/item', {
+        method: 'POST', headers: headers(),
+        body: JSON.stringify({ dia_prazo: dia, descricao: desc, periodo_referencia: periodo || undefined })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.erro || 'HTTP ' + r.status);
+      document.getElementById('modal-item').style.display = 'none';
+      toast('Item incluído neste mês', 'ok');
+      await buscar();
+    } catch (err) { toast('Erro: ' + err.message, 'err'); }
+  });
+
+  // ── Gerenciar agenda fixa ────────────────────────────
+  document.getElementById('btn-gerenciar').addEventListener('click', async function() {
+    document.getElementById('modal-agenda').style.display = 'flex';
+    await carregarAgenda();
+  });
+  document.getElementById('btn-ma-close').addEventListener('click', async function() {
+    document.getElementById('modal-agenda').style.display = 'none';
+    await buscar();
+  });
+
+  async function carregarAgenda() {
+    const tbody = document.getElementById('body-agenda');
+    tbody.innerHTML = '<tr><td colspan="4">Carregando...</td></tr>';
+    try {
+      const r = await fetch('/v1/obrigacoes', { headers: headers() });
+      const lista = await r.json();
+      tbody.innerHTML = lista.map(function(o) {
+        const ref = o.periodo_fixo ? esc(o.periodo_fixo) : (o.defasagem_meses === 2 ? 'Mês anterior ao anterior' : 'Mês anterior');
+        return '<tr data-id="' + o.id + '">' +
+          '<td class="dia">' + esc(o.dia_prazo) + '</td>' +
+          '<td>' + esc(o.descricao) + '</td>' +
+          '<td class="periodo">' + ref + '</td>' +
+          '<td class="acoes"><button class="btn-act btn-act-del" data-act="desativar">Desativar</button></td></tr>';
+      }).join('') || '<tr><td colspan="4">Nenhuma obrigação ativa.</td></tr>';
+    } catch (e) { tbody.innerHTML = '<tr><td colspan="4">Erro: ' + esc(e.message) + '</td></tr>'; }
+  }
+
+  document.getElementById('body-agenda').addEventListener('click', async function(e) {
+    const btn = e.target.closest('button[data-act="desativar"]');
+    if (!btn) return;
+    const id = btn.closest('tr').dataset.id;
+    if (!confirm('Remover este item da agenda fixa? Meses futuros deixarão de gerá-lo.')) return;
+    try {
+      const r = await fetch('/v1/obrigacoes/' + id, { method: 'DELETE', headers: headers() });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      toast('Removido da agenda fixa', 'ok');
+      await carregarAgenda();
+    } catch (err) { toast('Erro: ' + err.message, 'err'); }
+  });
+
+  document.getElementById('ma-ref').addEventListener('change', function() {
+    document.getElementById('ma-fixo').disabled = this.value !== 'fixo';
+  });
+
+  document.getElementById('btn-ma-add').addEventListener('click', async function() {
+    const dia = document.getElementById('ma-dia').value.trim();
+    const diaOrd = Number(document.getElementById('ma-dia-ord').value);
+    const desc = document.getElementById('ma-desc').value.trim();
+    const ref = document.getElementById('ma-ref').value;
+    const fixo = document.getElementById('ma-fixo').value.trim();
+    if (!dia || !diaOrd || !desc) { toast('Preencha dia, dia (nº) e descrição', 'err'); return; }
+    const body = { dia_prazo: dia, dia_prazo_ord: diaOrd, descricao: desc };
+    if (ref === 'fixo') { body.periodo_fixo = fixo || 'A definir'; } else { body.defasagem_meses = Number(ref); }
+    try {
+      const r = await fetch('/v1/obrigacoes', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.erro || 'HTTP ' + r.status);
+      document.getElementById('ma-dia').value = ''; document.getElementById('ma-dia-ord').value = '';
+      document.getElementById('ma-desc').value = ''; document.getElementById('ma-fixo').value = '';
+      toast('Incluído na agenda fixa', 'ok');
+      await carregarAgenda();
+    } catch (err) { toast('Erro: ' + err.message, 'err'); }
+  });
+
+  document.getElementById('sel-comp').addEventListener('change', buscar);
+})();
+</script>
+</body>
+</html>
