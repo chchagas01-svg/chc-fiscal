@@ -416,9 +416,14 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
       <div class="tile-sub" id="s-valor">—</div>
     </div>
     <div class="tile entrada">
-      <div class="tile-label">Entrada (compras / tomados)</div>
-      <div class="tile-value" id="e-docs">—</div>
-      <div class="tile-sub" id="e-valor">—</div>
+      <div class="tile-label">Serviços Tomados (NFS-e)</div>
+      <div class="tile-value" id="t-docs">—</div>
+      <div class="tile-sub" id="t-valor">—</div>
+    </div>
+    <div class="tile entrada">
+      <div class="tile-label">Compras (NF-e)</div>
+      <div class="tile-value" id="co-docs">—</div>
+      <div class="tile-sub" id="co-valor">—</div>
     </div>
     <div class="tile canc">
       <div class="tile-label">Canceladas (total)</div>
@@ -429,7 +434,8 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
 
   <div class="tabs" id="tabs" style="display:none">
     <button class="tab active" data-tab="saida">Saída</button>
-    <button class="tab" data-tab="entrada">Entrada</button>
+    <button class="tab" data-tab="tomados">Serviços Tomados</button>
+    <button class="tab" data-tab="compras">Compras</button>
     <button class="tab" data-tab="retencoes">Retenções (Reinf)</button>
   </div>
 
@@ -473,23 +479,23 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
       </div>
     </div>
 
-    <!-- Tabela Entrada -->
-    <div id="painel-entrada" style="display:none">
+    <!-- Tabela Serviços Tomados (NFS-e) -->
+    <div id="painel-tomados" style="display:none">
       <div class="table-controls">
-        <span class="table-count" id="count-entrada"></span>
+        <span class="table-count" id="count-tomados"></span>
         <label class="toggle-canc">
-          <input type="checkbox" id="chk-canc-entrada" checked> Mostrar canceladas
+          <input type="checkbox" id="chk-canc-tomados" checked> Mostrar canceladas
         </label>
       </div>
       <div class="tbl-container">
-        <table id="tbl-entrada">
+        <table id="tbl-tomados">
           <thead>
             <tr>
               <th>Nº</th>
               <th>Tipo</th>
               <th>Data</th>
-              <th>Emitente</th>
-              <th class="mono">CNPJ Emitente</th>
+              <th>Prestador</th>
+              <th class="mono">CNPJ Prestador</th>
               <th class="num">Valor Bruto</th>
               <th class="num">ICMS Créd.</th>
               <th class="num">Valor Líquido</th>
@@ -497,8 +503,38 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
               <th></th>
             </tr>
           </thead>
-          <tbody id="body-entrada"></tbody>
-          <tfoot id="foot-entrada"></tfoot>
+          <tbody id="body-tomados"></tbody>
+          <tfoot id="foot-tomados"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tabela Compras (NF-e) -->
+    <div id="painel-compras" style="display:none">
+      <div class="table-controls">
+        <span class="table-count" id="count-compras"></span>
+        <label class="toggle-canc">
+          <input type="checkbox" id="chk-canc-compras" checked> Mostrar canceladas
+        </label>
+      </div>
+      <div class="tbl-container">
+        <table id="tbl-compras">
+          <thead>
+            <tr>
+              <th>Nº</th>
+              <th>Tipo</th>
+              <th>Data</th>
+              <th>Fornecedor</th>
+              <th class="mono">CNPJ Fornecedor</th>
+              <th class="num">Valor Bruto</th>
+              <th class="num">ICMS Créd.</th>
+              <th class="num">Valor Líquido</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="body-compras"></tbody>
+          <tfoot id="foot-compras"></tfoot>
         </table>
       </div>
     </div>
@@ -636,7 +672,8 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
     document.getElementById('summary').style.display = 'none';
     document.getElementById('tabs').style.display = 'none';
     document.getElementById('painel-saida').style.display = 'none';
-    document.getElementById('painel-entrada').style.display = 'none';
+    document.getElementById('painel-tomados').style.display = 'none';
+    document.getElementById('painel-compras').style.display = 'none';
     document.getElementById('btn-buscar').disabled = true;
 
     try {
@@ -662,19 +699,35 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
     const d = dadosAtivos;
     document.getElementById('carregando').style.display = 'none';
 
+    // Entrada (tomados + compras) vem junta do backend — separa aqui pela natureza
+    const tomados = d.entrada.filter(function(n) { return n.natureza === 'servico_tomado'; });
+    const compras = d.entrada.filter(function(n) { return n.natureza === 'compra'; });
+    const resumoDe = function(arr) {
+      const ativos = arr.filter(function(n) { return !n.cancelada; });
+      return {
+        ativos: ativos.length,
+        canceladas: arr.length - ativos.length,
+        valor_bruto: ativos.reduce(function(s, n) { return s + (parseFloat(n.valor_bruto) || 0); }, 0),
+      };
+    };
+    const rt = resumoDe(tomados), rc = resumoDe(compras);
+
     // Summary
-    const rs = d.resumo.saida, re = d.resumo.entrada;
-    const totalCanc = rs.canceladas + re.canceladas;
+    const rs = d.resumo.saida;
+    const totalCanc = rs.canceladas + rt.canceladas + rc.canceladas;
     document.getElementById('s-docs').textContent = rs.ativos + ' doc' + (rs.ativos !== 1 ? 's' : '');
     document.getElementById('s-valor').textContent = 'R$ ' + fmt(rs.valor_liquido) + ' líquido';
-    document.getElementById('e-docs').textContent = re.ativos + ' doc' + (re.ativos !== 1 ? 's' : '');
-    document.getElementById('e-valor').textContent = 'R$ ' + fmt(re.valor_bruto) + ' bruto';
+    document.getElementById('t-docs').textContent = rt.ativos + ' doc' + (rt.ativos !== 1 ? 's' : '');
+    document.getElementById('t-valor').textContent = 'R$ ' + fmt(rt.valor_bruto) + ' bruto';
+    document.getElementById('co-docs').textContent = rc.ativos + ' doc' + (rc.ativos !== 1 ? 's' : '');
+    document.getElementById('co-valor').textContent = 'R$ ' + fmt(rc.valor_bruto) + ' bruto';
     document.getElementById('c-docs').textContent = totalCanc + ' doc' + (totalCanc !== 1 ? 's' : '');
     document.getElementById('summary').style.display = '';
     document.getElementById('tabs').style.display = '';
 
     renderTabela('saida', d.saida, 'body-saida', 'foot-saida', 'count-saida', 'chk-canc-saida');
-    renderTabela('entrada', d.entrada, 'body-entrada', 'foot-entrada', 'count-entrada', 'chk-canc-entrada');
+    renderTabela('tomados', tomados, 'body-tomados', 'foot-tomados', 'count-tomados', 'chk-canc-tomados');
+    renderTabela('compras', compras, 'body-compras', 'foot-compras', 'count-compras', 'chk-canc-compras');
     mostrarTab(tabAtiva);
   }
 
@@ -803,7 +856,8 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
       b.classList.toggle('active', b.dataset.tab === tab);
     });
     document.getElementById('painel-saida').style.display  = tab === 'saida'  ? '' : 'none';
-    document.getElementById('painel-entrada').style.display = tab === 'entrada' ? '' : 'none';
+    document.getElementById('painel-tomados').style.display = tab === 'tomados' ? '' : 'none';
+    document.getElementById('painel-compras').style.display = tab === 'compras' ? '' : 'none';
     document.getElementById('painel-retencoes').style.display = tab === 'retencoes' ? '' : 'none';
     if (tab === 'retencoes') carregarRetencoes();
   }
@@ -981,7 +1035,8 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
 
   // ── Delegação: cliques nas ações da tabela ──────────
   document.getElementById('painel-saida').addEventListener('click',  function(e) { handleAcao(e); });
-  document.getElementById('painel-entrada').addEventListener('click', function(e) { handleAcao(e); });
+  document.getElementById('painel-tomados').addEventListener('click', function(e) { handleAcao(e); });
+  document.getElementById('painel-compras').addEventListener('click', function(e) { handleAcao(e); });
 
   function handleAcao(e) {
     const btn = e.target.closest('[data-act]');
