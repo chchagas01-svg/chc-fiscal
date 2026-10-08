@@ -174,6 +174,8 @@ tbody td { padding: 9px 10px; }
       <div class="card-sub">Roda no SEU computador — abre um navegador de verdade, preenche o login sozinho, para no captcha para você clicar, e continua sozinho até confirmar o envio.</div>
       <div class="cmd-box" id="cmd-envio">cd C:\Users\Home\CHC-Sistema\chc-fiscal
 node scripts/enviar-issqn-campinas.js --empresa=&lt;id&gt; --competencia=AAAA-MM</div>
+      <button class="btn-primary" id="btn-copiar-cmd" style="margin-top:10px">📋 Copiar comando</button>
+      <div class="card-sub" style="margin-top:8px">Cole (Ctrl+V) no terminal do VS Code e aperte Enter. Não dá para ter um botão que já envia sozinho — o navegador não tem permissão para abrir programas no seu computador por segurança; o terminal é o único "clique" que falta.</div>
     </div>
   </div>
 
@@ -307,6 +309,12 @@ node scripts/enviar-issqn-campinas.js --empresa=&lt;id&gt; --competencia=AAAA-MM
   document.getElementById('btn-gerar').addEventListener('click', function() { gerar(false); });
   document.getElementById('btn-baixar').addEventListener('click', function() { gerar(true); });
 
+  document.getElementById('btn-copiar-cmd').addEventListener('click', async function() {
+    try {
+      await navigator.clipboard.writeText(document.getElementById('cmd-envio').textContent);
+      toast('Comando copiado — cole no terminal', 'ok');
+    } catch (e) { toast('Não consegui copiar automaticamente, selecione o texto manualmente', 'err'); }
+  });
   document.getElementById('g-empresa').addEventListener('change', atualizarComando);
   document.getElementById('g-comp').addEventListener('change', atualizarComando);
   function atualizarComando() {
