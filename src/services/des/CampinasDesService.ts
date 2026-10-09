@@ -31,8 +31,9 @@ function splitTipoLogradouro(xLgr: string): { tipo: string; nome: string } {
 
 interface Endereco {
   cMunPrestador: string; cidadeNome: string; uf: string; cep: string;
-  tipoLogr: string; nomeLogr: string; numeroEndereco: string; complementoBairro: string;
-  simplesFlag: 'S' | 'N'; cTribNac: string; regime: 'RPP' | 'RNF';
+  tipoLogr: string; nomeLogr: string; numeroEndereco: string; bairro: string;
+  simplesFlag: 'S' | 'N'; meiFlag: 'S' | 'N'; cTribNac: string; regime: 'RPP' | 'RNF';
+  discriminacao: string;
 }
 
 async function extrairEndereco(xml: string): Promise<Endereco> {
@@ -53,13 +54,16 @@ async function extrairEndereco(xml: string): Promise<Endereco> {
     // Produtos/licenças faturados por distribuidoras (ex.: SND) saem como "RNF" no layout de
     // referência; demais prestação de serviço como "RPP".
     const itemNum = Number(s(cServ['cTribNac']).substring(0, 2));
+    const discriminacao = s(cServ['xDescServ']);
     return {
       cMunPrestador: s(enderNac['cMun']), cidadeNome: s(inf['xLocEmi']), uf: s(enderNac['UF']), cep: s(enderNac['CEP']),
       tipoLogr: tipo, nomeLogr: nome, numeroEndereco: s(enderNac['nro']),
-      complementoBairro: [s(enderNac['xCpl']), s(enderNac['xBairro'])].filter(Boolean).join(' - '),
-      simplesFlag: (opSimpNac === '2' || opSimpNac === '3') ? 'S' : 'N',
+      bairro: s(enderNac['xBairro']),
+      simplesFlag: opSimpNac === '3' ? 'S' : 'N',
+      meiFlag: opSimpNac === '2' ? 'S' : 'N',
       cTribNac: s(cServ['cTribNac']),
       regime: itemNum === 1 ? 'RNF' : 'RPP',
+      discriminacao,
     };
   }
 
@@ -72,13 +76,17 @@ async function extrairEndereco(xml: string): Promise<Endereco> {
     const { tipo, nome } = splitTipoLogradouro(xLgr);
     const item = s(servico['ItemListaServico']);
     const itemNum = Number(item.substring(0, 2));
+    // ABRASF: OptanteSimplesNacional 1=optante Simples, 2=não optante (campo próprio não existe p/ MEI)
+    const optanteSimples = s(abrasfInf['OptanteSimplesNacional']) === '1';
     return {
       cMunPrestador: s(end['CodigoMunicipio']), cidadeNome: '', uf: s(end['Uf']), cep: s(end['Cep']),
       tipoLogr: tipo, nomeLogr: nome, numeroEndereco: s(end['Numero']),
-      complementoBairro: [s(end['Complemento']), s(end['Bairro'])].filter(Boolean).join(' - '),
-      simplesFlag: s(abrasfInf['OptanteSimplesNacional']) === '1' ? 'S' : 'N',
+      bairro: s(end['Bairro']),
+      simplesFlag: optanteSimples ? 'S' : 'N',
+      meiFlag: 'N',
       cTribNac: item,
       regime: itemNum === 1 ? 'RNF' : 'RPP',
+      discriminacao: s(g(servico, 'Discriminacao') ?? ''),
     };
   }
 
@@ -92,44 +100,66 @@ interface NotaRow {
   xml_raw: string | null;
 }
 
-function buildLine(end: Endereco, item4: string, cnae9: string, n: NotaRow, competencia: string): string {
+// Posições conferidas campo a campo contra o manual oficial "Layout de importação de Serviços
+// Tomados" (IMA 2024, fornecido pelo usuário em 10/2026) — números de campo nos comentários.
+function buildLine(end: Endereco, codigoServico: string, cnae9: string, n: NotaRow, competencia: string): string {
   const valorServico = Number(n.valor_bruto);
   const valorIss = Number(n.valor_iss);
   const aliquota = valorServico > 0 ? (valorIss / valorServico * 100) : 0;
   const dataEmissao = new Date(n.data_emissao).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+  const discriminacao = (end.discriminacao || '').replace(/[\r\n]+/g, ' ').trim();
 
-  let out = 'T';
-  out += pad(dataEmissao, 10);
-  out += pad(competencia, 7);
-  out += pad(n.numero, 20);
-  out += 'OM1';
-  out += pad(n.cnpj_emitente.replace(/\D/g, '').padStart(14, '0'), 14);
-  out += pad('', 20);
-  out += pad(n.nome_emitente, 150);
-  out += pad(end.cMunPrestador, 7);
-  out += pad(end.simplesFlag + 'NN', 3);
-  out += pad(end.cep.replace(/\D/g, ''), 8);
-  out += pad(end.tipoLogr, 25);
-  out += pad(end.nomeLogr, 50);
-  out += pad(end.numeroEndereco, 70);
-  out += pad(end.complementoBairro, 60);
-  out += pad(end.uf, 2);
-  out += '1058';
-  out += pad(end.cidadeNome, 50);
-  out += pad(item4, 4) + ' ' + pad(cnae9, 9);
-  out += pad('', 15);
-  out += 'LOC' + pad('3509502', 7) + pad('SP', 2);
-  out += pad('', 104);
-  out += 'BRA' + pad('3509502', 7) + pad('SP', 2);
-  out += pad('', 105);
-  out += '1' + end.regime;
-  out += pad(aliquota.toFixed(2), 5);
-  out += num15(valorServico);
-  out += num15(0); out += num15(0); out += num15(0);
-  out += num15(valorServico);
-  out += num15(n.ret_pis); out += num15(n.ret_cofins); out += num15(n.ret_csll); out += num15(n.ret_irrf); out += num15(n.ret_inss);
-  out += num15(0);
-  out += num15(valorIss);
+  let out = 'T';                                                    // 01 identificação (1)
+  out += pad(dataEmissao, 10);                                      // 02 data emissão (10)
+  out += pad(competencia, 7);                                       // 03 data competência (7)
+  out += pad(n.numero.replace(/\D/g, ''), 15);                      // 04 número doc. fiscal (15)
+  out += pad('', 5);                                                // 05 série (5) — não usamos série
+  out += 'OM';                                                      // 06 modelo doc. fiscal (2) — NF de Outro Município
+  out += '1';                                                       // 07 tipo prestador (1) — 1=Nacional
+  out += pad(n.cnpj_emitente.replace(/\D/g, '').padStart(14, '0'), 14); // 08 CPF/CNPJ prestador (14)
+  out += pad('', 20);                                               // 09 doc. identificação exterior (20) — N/A
+  out += pad(n.nome_emitente, 150);                                 // 10 nome/razão social (150)
+  out += pad(end.cMunPrestador, 7);                                 // 11 código município prestador (7)
+  out += end.simplesFlag;                                           // 12 optante Simples (1)
+  out += end.meiFlag;                                               // 13 optante MEI (1)
+  out += 'N';                                                       // 14 estabelecido no município (1) — sempre N (só incluímos fora de Campinas)
+  out += pad(end.cep.replace(/\D/g, ''), 8);                        // 15 CEP prestador (8)
+  out += pad(end.tipoLogr, 25);                                     // 16 tipo logradouro (25)
+  out += pad(end.nomeLogr, 50);                                     // 17 nome logradouro (50)
+  out += pad(end.numeroEndereco, 10);                               // 18 número logradouro (10)
+  out += pad('', 60);                                               // 19 complemento (60) — exige formato "TIPO:valor" (tabela do manual); deixado em branco (opcional) por não termos esse dado estruturado
+  out += pad(end.bairro, 60);                                       // 20 bairro (60)
+  out += pad(end.uf, 2);                                            // 21 UF prestador (2)
+  out += pad('', 4);                                                // 22 país prestador (4) — só exterior
+  out += pad(end.cidadeNome, 50);                                   // 23 cidade prestador (50)
+  out += pad(codigoServico, 5);                                     // 24 código do serviço (5)
+  out += pad(cnae9, 9);                                             // 25 código CNAE (9)
+  out += pad('', 15);                                               // 26 código obra (15) — N/A
+  out += 'LOC';                                                     // 27 local da prestação (3) — serviço prestado no município do tomador
+  out += pad('3509502', 7);                                         // 28 código município local prestação (7)
+  out += pad('SP', 2);                                              // 29 UF prestação (2)
+  out += pad('', 50 + 50 + 4);                                      // 30+31+32 município/estado/país exterior prestação — N/A
+  out += 'BRA';                                                     // 33 local do resultado da prestação (3)
+  out += pad('3509502', 7);                                         // 34 código município resultado (7)
+  out += pad('SP', 2);                                              // 35 UF resultado (2)
+  out += pad('', 50 + 50 + 4);                                      // 36+37+38 município/estado/país exterior resultado — N/A
+  out += ' ';                                                       // 39 motivo da não retenção (1) — N/A (serviço normalmente tributado)
+  out += '1';                                                       // 40 exigibilidade do ISS (1) — 1=Exigível
+  out += end.regime;                                                // 41 tipo recolhimento (3) — RPP ou RNF
+  out += pad(aliquota.toFixed(2), 5);                               // 42 alíquota ISS (5)
+  out += num15(valorServico);                                       // 43 valor do serviço (15)
+  out += num15(0);                                                  // 44 valor das deduções (15)
+  out += num15(0);                                                  // 45 desconto incondicionado (15)
+  out += num15(0);                                                  // 46 desconto condicionado (15)
+  out += num15(valorServico);                                       // 47 base de cálculo (15)
+  out += num15(n.ret_pis);                                          // 48 valor PIS (15)
+  out += num15(n.ret_cofins);                                       // 49 valor COFINS (15)
+  out += num15(n.ret_inss);                                         // 50 valor INSS (15)
+  out += num15(n.ret_irrf);                                         // 51 valor IR (15)
+  out += num15(n.ret_csll);                                         // 52 valor CSLL (15)
+  out += num15(0);                                                  // 53 outras retenções (15)
+  out += num15(valorIss);                                           // 54 valor do ISS (15)
+  out += pad(discriminacao, 2000);                                  // 55 discriminação dos serviços (2000)
   return out;
 }
 
@@ -216,7 +246,7 @@ export async function gerarDesCampinas(empresaId: number, competencia: string): 
 
   const conteudo = faltando.length > 0
     ? null // não gera arquivo incompleto — força resolver os mapeamentos faltantes antes
-    : ['H' + pad(inscricaoMunicipal.replace(/\D/g, ''), 9), ...linhas].join('\r\n') + (linhas.length ? '\r\n' : '');
+    : ['H' + pad(inscricaoMunicipal, 30), ...linhas].join('\r\n') + (linhas.length ? '\r\n' : '');
 
   return {
     conteudo, inscricaoMunicipal, competencia,
