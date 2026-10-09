@@ -98,8 +98,16 @@ router.get('/campinas/des/:competencia/download', async (req, res) => {
       `INSERT INTO des_exportacoes (empresa_id, sistema, competencia, notas_ids, conteudo) VALUES ($1,'campinas_nfse',$2,$3,$4)`,
       [empresaId, competencia, resultado.notas_ids, resultado.conteudo]
     );
+    // Arquivo de colunas fixas: o portal de Campinas espera ISO-8859-1 (Latin-1), 1 byte por
+    // caractere. Em UTF-8, acentos (ç/ã/á...) ocupam 2 bytes e desalinham todas as colunas
+    // seguintes — foi a causa confirmada do "Erro de Layout" ao gravar no portal.
+    let fora = 0;
+    const bufferLatin1 = Buffer.from(resultado.conteudo.replace(/[^\x00-\xFF]/g, () => { fora++; return '?'; }), 'latin1');
+    if (fora > 0) console.warn(`[campinas-des] ${fora} caractere(s) fora do Latin-1 substituídos por '?' na competência ${competencia}`);
+
     res.setHeader('Content-Disposition', `attachment; filename="des_campinas_${competencia}.txt"`);
-    return res.type('text/plain').send(resultado.conteudo);
+    res.setHeader('Content-Type', 'text/plain; charset=ISO-8859-1');
+    return res.send(bufferLatin1);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return res.status(500).json({ erro: 'Falha ao gerar arquivo DES', detalhe: msg });
