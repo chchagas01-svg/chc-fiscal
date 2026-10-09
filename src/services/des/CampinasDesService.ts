@@ -20,6 +20,7 @@ function num15(v: number | string): string {
   return pad((Number(v) || 0).toFixed(2), 15);
 }
 function s(v: unknown): string { return Array.isArray(v) ? String(v[0] ?? '') : String(v ?? ''); }
+function num(v: unknown): number { const n = parseFloat(s(v).replace(',', '.')); return isNaN(n) ? 0 : n; }
 function g(obj: unknown, ...path: string[]): unknown {
   let cur = obj;
   for (const k of path) { if (cur == null || typeof cur !== 'object') return undefined; cur = (cur as Record<string, unknown>)[k]; }
@@ -39,7 +40,7 @@ interface Endereco {
   cMunPrestador: string; cidadeNome: string; uf: string; cep: string;
   tipoLogr: string; nomeLogr: string; numeroEndereco: string; bairro: string;
   simplesFlag: 'S' | 'N'; meiFlag: 'S' | 'N'; cTribNac: string; regime: 'RPP' | 'RNF';
-  discriminacao: string;
+  discriminacao: string; aliquotaNf: number;
 }
 
 async function extrairEndereco(xml: string): Promise<Endereco> {
@@ -61,6 +62,14 @@ async function extrairEndereco(xml: string): Promise<Endereco> {
     // referência; demais prestação de serviço como "RPP".
     const itemNum = Number(s(cServ['cTribNac']).substring(0, 2));
     const discriminacao = s(cServ['xDescServ']);
+    // Alíquota declarada pelo próprio prestador no XML (padrão nacional: <valores><pAliqAplic>,
+    // no nível da NFS-e, não dentro do DPS) — é a que o campo 42 do leiaute de Campinas pede,
+    // não uma derivada de ISS÷serviço (os dois valores já vêm arredondados a 2 casas, e a
+    // prefeitura recalcula ISS = alíquota×base e rejeita se não bater exatamente). Simples
+    // Nacional costuma não ter esse campo na nota — por instrução do usuário, usa 5% quando
+    // não constar (ver montagem da linha em buildLine).
+    const valoresNfe = (inf['valores'] ?? {}) as Record<string, unknown>;
+    const pAliq = num(valoresNfe['pAliqAplic']);
     return {
       cMunPrestador: s(enderNac['cMun']), cidadeNome: s(inf['xLocEmi']), uf: s(enderNac['UF']), cep: s(enderNac['CEP']),
       tipoLogr: tipo, nomeLogr: nome, numeroEndereco: s(enderNac['nro']),
@@ -69,7 +78,7 @@ async function extrairEndereco(xml: string): Promise<Endereco> {
       meiFlag: opSimpNac === '2' ? 'S' : 'N',
       cTribNac: s(cServ['cTribNac']),
       regime: itemNum === 1 ? 'RNF' : 'RPP',
-      discriminacao,
+      discriminacao, aliquotaNf: pAliq,
     };
   }
 
@@ -84,6 +93,8 @@ async function extrairEndereco(xml: string): Promise<Endereco> {
     const itemNum = Number(item.substring(0, 2));
     // ABRASF: OptanteSimplesNacional 1=optante Simples, 2=não optante (campo próprio não existe p/ MEI)
     const optanteSimples = s(abrasfInf['OptanteSimplesNacional']) === '1';
+    const valores = (servico['Valores'] ?? {}) as Record<string, unknown>;
+    const pAliq = num(valores['Aliquota']);
     return {
       cMunPrestador: s(end['CodigoMunicipio']), cidadeNome: '', uf: s(end['Uf']), cep: s(end['Cep']),
       tipoLogr: tipo, nomeLogr: nome, numeroEndereco: s(end['Numero']),
@@ -92,7 +103,7 @@ async function extrairEndereco(xml: string): Promise<Endereco> {
       meiFlag: 'N',
       cTribNac: item,
       regime: itemNum === 1 ? 'RNF' : 'RPP',
-      discriminacao: s(g(servico, 'Discriminacao') ?? ''),
+      discriminacao: s(g(servico, 'Discriminacao') ?? ''), aliquotaNf: pAliq,
     };
   }
 
@@ -110,8 +121,13 @@ interface NotaRow {
 // Tomados" (IMA 2024, fornecido pelo usuário em 10/2026) — números de campo nos comentários.
 function buildLine(end: Endereco, codigoServico: string, cnae9: string, n: NotaRow, competencia: string): string {
   const valorServico = Number(n.valor_bruto);
-  const valorIss = Number(n.valor_iss);
-  const aliquota = valorServico > 0 ? (valorIss / valorServico * 100) : 0;
+  // Alíquota: a declarada na nota original (campo pAliqAplic do XML); quando não consta ou é
+  // zero (comum para Simples Nacional, que recolhe ISS via DAS sem destacar alíquota na nota),
+  // usa 5% por instrução do usuário. O ISS é recalculado a partir dela — não reaproveita o
+  // valor_iss já gravado no banco, que pode ter sido arredondado por outro caminho e não bater
+  // exatamente com alíquota×base na conferência da prefeitura (campo 54 = campo 42 × campo 47).
+  const aliquota = end.aliquotaNf > 0 ? end.aliquotaNf : 5;
+  const valorIss = Math.round(valorServico * aliquota) / 100;
   const dataEmissao = new Date(n.data_emissao).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
   const discriminacao = (end.discriminacao || '').replace(/[\r\n]+/g, ' ').trim();
 
