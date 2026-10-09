@@ -6,6 +6,12 @@
 import { parseStringPromise } from 'xml2js';
 import { query } from '../../config/database';
 
+// Nosso formato interno é "YYYY-MM"; o manual exige "MM/YYYY" no campo 03 (Data Competência).
+function competenciaMMYYYY(competencia: string): string {
+  const [ano, mes] = competencia.split('-');
+  return `${mes}/${ano}`;
+}
+
 function pad(s: unknown, len: number): string {
   const str = String(s ?? '');
   return str.length >= len ? str.substring(0, len) : str + ' '.repeat(len - str.length);
@@ -111,7 +117,7 @@ function buildLine(end: Endereco, codigoServico: string, cnae9: string, n: NotaR
 
   let out = 'T';                                                    // 01 identificação (1)
   out += pad(dataEmissao, 10);                                      // 02 data emissão (10)
-  out += pad(competencia, 7);                                       // 03 data competência (7)
+  out += pad(competenciaMMYYYY(competencia), 7);                    // 03 data competência (7) — formato MM/YYYY
   out += pad(n.numero.replace(/\D/g, ''), 15);                      // 04 número doc. fiscal (15)
   out += pad('', 5);                                                // 05 série (5) — não usamos série
   out += 'OM';                                                      // 06 modelo doc. fiscal (2) — NF de Outro Município
