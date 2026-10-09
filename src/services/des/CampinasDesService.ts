@@ -127,7 +127,11 @@ function buildLine(end: Endereco, codigoServico: string, cnae9: string, n: NotaR
   // valor_iss já gravado no banco, que pode ter sido arredondado por outro caminho e não bater
   // exatamente com alíquota×base na conferência da prefeitura (campo 54 = campo 42 × campo 47).
   const aliquota = end.aliquotaNf > 0 ? end.aliquotaNf : 5;
-  const valorIss = Math.round(valorServico * aliquota) / 100;
+  // A prefeitura TRUNCA (não arredonda) ao conferir campo54 = campo42×campo47 — confirmado:
+  // só as notas cujo 3º decimal pedia arredondar PARA CIMA (ex.: 21,77775→21,78) foram
+  // rejeitadas; as que arredondavam para baixo ou davam exato passaram. O pequeno epsilon
+  // evita que ruído de ponto flutuante derrube por engano um valor que deveria ser exato.
+  const valorIss = Math.floor(valorServico * aliquota + 1e-7) / 100;
   const dataEmissao = new Date(n.data_emissao).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
   const discriminacao = (end.discriminacao || '').replace(/[\r\n]+/g, ' ').trim();
 
