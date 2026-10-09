@@ -12,13 +12,18 @@
 //   node scripts/enviar-issqn-campinas.js --empresa=2 --competencia=2026-09
 'use strict';
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const https = require('https');
 const { chromium } = require('playwright');
 
 const API_BASE = process.env.CHC_API_BASE || 'https://chc-fiscal-production.up.railway.app';
 const API_KEY = process.env.CHC_API_KEY || 'Okc6EW2NRw3G5EuYisuwXo4ejEQQJsblIdnqYqzgQGE=';
+// Arquivos gerados ficam aqui, separados por empresa — não na pasta temporária do Windows.
+const PASTA_BASE = process.env.CHC_PASTA_ISSQN || 'C:\\escritorio_virtual\\ISSQN Campinas - Servicos Tomados';
+
+function nomeDePasta(nome) {
+  return String(nome).replace(/[\\/:*?"<>|]/g, '').trim();
+}
 
 function parseArgs() {
   const args = {};
@@ -55,14 +60,19 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`[1/5] Buscando credenciais da empresa ${empresaId}...`);
+  console.log(`[1/5] Buscando dados da empresa ${empresaId}...`);
+  const empresas = await apiGet('/v1/notas/empresas');
+  const empresa = empresas.find((e) => String(e.id) === String(empresaId));
+  const nomeEmpresa = empresa ? empresa.nome : `empresa-${empresaId}`;
   const cred = await apiGet(`/v1/portais/credenciais?empresa_id=${empresaId}&sistema=campinas_nfse`);
   const urlLogin = cred.url_login || 'https://novanfse.campinas.sp.gov.br/notafiscal/paginas/importacaotomador/importacaoTomadorList.jsf';
   const urlImportacao = cred.url_importacao || urlLogin;
 
   console.log(`[2/5] Gerando/baixando arquivo DES de ${competencia}...`);
   const conteudo = await apiGet(`/v1/portais/campinas/des/${competencia}/download?empresa_id=${empresaId}`, { raw: true });
-  const arquivoLocal = path.join(os.tmpdir(), `des_campinas_${empresaId}_${competencia}.txt`);
+  const pastaEmpresa = path.join(PASTA_BASE, nomeDePasta(nomeEmpresa));
+  fs.mkdirSync(pastaEmpresa, { recursive: true });
+  const arquivoLocal = path.join(pastaEmpresa, `des_campinas_${competencia}.txt`);
   fs.writeFileSync(arquivoLocal, conteudo);
   console.log(`      Arquivo salvo em: ${arquivoLocal} (${conteudo.length} bytes)`);
 
