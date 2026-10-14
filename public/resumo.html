@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHC-Fiscal — Resumo Mensal</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #F4F5FB; --surface: #fff; --surface-2: #ECEEF8;
+  --fg: #1A1D30; --fg-2: #606480; --accent: #3549D6; --accent-s: #E5E8FF;
+  --ok: #15803D; --warn: #92400E; --warn-s: #FEF3C7; --err: #B91C1C;
+  --border: #DDE0F0; --r: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+    --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+    --ok: #22C55E; --warn: #F59E0B; --warn-s: #1C1102; --err: #F87171;
+    --border: #24284A; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0D1020; --surface: #141728; --surface-2: #1B1F36;
+  --fg: #E3E5F5; --fg-2: #8085A8; --accent: #6677F5; --accent-s: #1A2060;
+  --ok: #22C55E; --warn: #F59E0B; --warn-s: #1C1102; --err: #F87171;
+  --border: #24284A; color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; }
+body { font-family: 'IBM Plex Sans', system-ui, sans-serif; background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.5; }
+
+#login-screen { display: none; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+.login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 36px 32px; width: 100%; max-width: 360px; }
+.login-logo { color: var(--accent); font-weight: 600; font-size: 16px; margin-bottom: 24px; }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.field label { font-size: 11px; font-weight: 600; color: var(--fg-2); text-transform: uppercase; letter-spacing: .06em; }
+.field input, .field select { font-family: inherit; font-size: 13px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); color: var(--fg); width: 100%; }
+.btn { padding: 9px 20px; border: none; border-radius: 7px; background: var(--accent); color: #fff; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; align-self: flex-end; }
+.btn:hover { opacity: .88; } .btn:disabled { opacity: .5; cursor: default; }
+.btn.ghost { background: none; color: var(--fg); border: 1px solid var(--border); }
+
+#app { display: none; }
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+.logo { color: var(--accent); font-weight: 600; font-size: 15px; }
+.page-title { font-weight: 600; font-size: 15px; }
+header a.back { margin-left: auto; font-size: 13px; color: var(--fg-2); text-decoration: none; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; }
+.filters { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.filters .field { margin: 0; min-width: 160px; flex: 1; }
+
+.content { padding: 24px; max-width: 920px; margin: 0 auto; }
+.empty { padding: 60px 24px; text-align: center; color: var(--fg-2); }
+
+/* Relatório */
+.relatorio { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 28px 32px; }
+.rel-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 2px solid var(--fg); padding-bottom: 10px; margin-bottom: 18px; }
+.rel-head h1 { font-size: 18px; letter-spacing: .08em; }
+.rel-head .emp { font-weight: 600; }
+.rel-head .meta { color: var(--fg-2); font-size: 12px; text-align: right; }
+h2 { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; margin: 22px 0 6px; }
+h3 { font-size: 12px; color: var(--fg-2); text-transform: uppercase; letter-spacing: .06em; margin: 14px 0 4px; }
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: right; font-weight: 600; font-size: 11px; color: var(--fg-2); text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--border); font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td:first-child { font-family: inherit; white-space: normal; }
+td.txt { font-family: inherit; text-align: center; }
+tr.total td { font-weight: 600; border-top: 1px solid var(--fg); border-bottom: none; }
+tr.grand td { font-weight: 600; font-size: 15px; color: var(--accent); border: none; padding-top: 12px; }
+.obs { font-size: 11px; color: var(--fg-2); font-family: inherit; }
+.neg { color: var(--err); }
+.alertas { background: var(--warn-s); border: 1px solid var(--warn); border-radius: var(--r); padding: 12px 16px; margin-bottom: 18px; color: var(--warn); font-size: 13px; }
+.alertas ul { padding-left: 18px; margin-top: 4px; }
+.selo { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 5px; background: var(--accent-s); color: var(--accent); margin-left: 6px; }
+
+@media print {
+  :root { --bg: #fff; --surface: #fff; --fg: #000; --fg-2: #444; --border: #bbb; --accent: #000; --accent-s: #eee; }
+  header, .filters, #login-screen { display: none !important; }
+  .content { padding: 0; max-width: none; }
+  .relatorio { border: none; padding: 0; }
+  .alertas { break-inside: avoid; }
+  @page { size: A4; margin: 14mm; }
+}
+@media (max-width: 600px) { .relatorio { padding: 18px 14px; } .content { padding: 16px; } }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">◆ CHC-Fiscal</div>
+    <div class="field">
+      <label>Chave de API</label>
+      <input type="password" id="api-key-input" placeholder="Cole a chave aqui" autocomplete="current-password">
+    </div>
+    <button class="btn" id="btn-login" style="width:100%">Entrar</button>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <span class="logo">◆ CHC-Fiscal</span>
+    <span class="page-title">Resumo Mensal</span>
+    <a class="back" href="/">← Painel</a>
+  </header>
+  <div class="filters">
+    <div class="field"><label>Empresa</label><select id="sel-empresa"><option value="">Selecione...</option></select></div>
+    <div class="field"><label>Competência</label><input type="month" id="sel-comp"></div>
+    <div class="field"><label>Apurado até</label><input type="date" id="sel-ate"></div>
+    <button class="btn" id="btn-buscar">Gerar</button>
+    <button class="btn ghost" id="btn-imprimir" disabled>Imprimir / PDF</button>
+  </div>
+  <div class="content" id="conteudo">
+    <div class="empty"><strong>Selecione a empresa e a competência</strong><p>O resumo é acumulado do dia 1º até a data escolhida.</p></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  let apiKey = '';
+  try { apiKey = localStorage.getItem('chc_api_key') || ''; } catch (e) {}
+  const headers = () => ({ Authorization: 'Bearer ' + apiKey });
+  const $ = (id) => document.getElementById(id);
+
+  const hoje = new Date();
+  const ymd = hoje.toISOString().substring(0, 10);
+  $('sel-comp').value = ymd.substring(0, 7);
+  $('sel-ate').value = ymd;
+
+  if (apiKey) boot(); else $('login-screen').style.display = 'flex';
+  $('btn-login').addEventListener('click', () => {
+    const k = $('api-key-input').value.trim(); if (!k) return;
+    apiKey = k; try { localStorage.setItem('chc_api_key', k); } catch (e) {}
+    boot();
+  });
+  $('api-key-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-login').click(); });
+  $('btn-buscar').addEventListener('click', gerar);
+  $('btn-imprimir').addEventListener('click', () => window.print());
+  // Ao trocar a competência, "apurado até" vai para o último dia (ou hoje, no mês corrente)
+  $('sel-comp').addEventListener('change', () => {
+    const [a, m] = $('sel-comp').value.split('-').map(Number);
+    const ult = new Date(Date.UTC(a, m, 0)).toISOString().substring(0, 10);
+    $('sel-ate').value = ult < ymd ? ult : ymd;
+  });
+
+  async function boot() {
+    $('login-screen').style.display = 'none';
+    $('app').style.display = 'block';
+    try {
+      const r = await fetch('/v1/notas/empresas', { headers: headers() });
+      if (r.status === 401) { try { localStorage.removeItem('chc_api_key'); } catch (e) {} location.reload(); return; }
+      (await r.json()).forEach((e) => {
+        const o = document.createElement('option');
+        o.value = e.id; o.textContent = e.nome;
+        $('sel-empresa').appendChild(o);
+      });
+      const q = new URLSearchParams(location.search);
+      if (q.get('empresa_id')) $('sel-empresa').value = q.get('empresa_id');
+      if (q.get('competencia')) $('sel-comp').value = q.get('competencia');
+      if (q.get('ate')) $('sel-ate').value = q.get('ate');
+      if (q.get('empresa_id')) gerar();
+    } catch (e) { console.error(e); }
+  }
+
+  const brl = (v) => (v == null ? '' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  const val = (v) => (!v ? '-' : '<span class="' + (v < 0 ? 'neg' : '') + '">' + brl(v) + '</span>');
+  const pct = (v) => (v == null ? '' : (v * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%');
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const fmtData = (d) => d.split('-').reverse().join('/');
+  const fmtCnpj = (c) => String(c).replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+
+  async function gerar() {
+    const emp = $('sel-empresa').value, comp = $('sel-comp').value, ate = $('sel-ate').value;
+    if (!emp || !comp) { alert('Selecione empresa e competência.'); return; }
+    $('btn-buscar').disabled = true;
+    $('conteudo').innerHTML = '<div class="empty"><strong>Gerando…</strong></div>';
+    try {
+      const url = '/v1/relatorio/resumo-mensal/' + comp + '?empresa_id=' + emp + (ate ? '&ate=' + ate : '');
+      const r = await fetch(url, { headers: headers() });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detalhe || d.erro || 'HTTP ' + r.status);
+      $('conteudo').innerHTML = render(d);
+      $('btn-imprimir').disabled = false;
+      history.replaceState(null, '', '?empresa_id=' + emp + '&competencia=' + comp + (ate ? '&ate=' + ate : ''));
+    } catch (e) {
+      $('conteudo').innerHTML = '<div class="empty"><strong>Erro</strong><p>' + esc(e.message) + '</p></div>';
+    } finally { $('btn-buscar').disabled = false; }
+  }
+
+  function linhasTributo(ls, colDed) {
+    return ls.map((t) => '<tr><td>' + esc(t.tributo) + (t.observacao ? '<div class="obs">' + esc(t.observacao) + '</div>' : '') +
+      '</td><td>' + pct(t.aliquota) + '</td><td>' + val(t.apurado) + '</td><td>' + val(t.deducoes) + '</td><td>' + val(t.a_recolher) + '</td></tr>').join('');
+  }
+  function quadroTributo(titulo, ls, colDed, total) {
+    if (!ls.length) return '';
+    return '<h3>' + titulo + '</h3><div class="tbl-wrap"><table><tr><th></th><th>Alíquota</th><th>Apurado</th><th>' + colDed + '</th><th>R$</th></tr>' +
+      linhasTributo(ls) + '<tr class="total"><td>Total</td><td></td><td></td><td></td><td>' + val(total) + '</td></tr></table></div>';
+  }
+
+  function render(d) {
+    const s = d.saidas, e = d.entradas, t = d.tributos, tom = e.servicos_tomados;
+    let h = '<div class="relatorio">';
+    h += '<div class="rel-head"><div><h1>RESUMO MENSAL</h1><div class="emp">' + esc(d.empresa.nome) + '</div>' +
+      '<div class="obs">CNPJ ' + fmtCnpj(d.empresa.cnpj) + (d.empresa.inscricao_estadual ? ' · IE ' + esc(d.empresa.inscricao_estadual) : '') + '</div></div>' +
+      '<div class="meta">Competência <strong>' + d.competencia.split('-').reverse().join('/') + '</strong><br>' +
+      (d.mes_fechado ? 'Mês completo' : 'Parcial até ' + fmtData(d.apurado_ate)) +
+      '<span class="selo">' + (d.empresa.regime === 'simples' ? 'Simples Nacional' : 'Lucro Presumido') + '</span></div></div>';
+
+    if (d.alertas.length) h += '<div class="alertas"><strong>Pontos de atenção</strong><ul>' + d.alertas.map((a) => '<li>' + esc(a) + '</li>').join('') + '</ul></div>';
+
+    h += '<h2>Saídas</h2><div class="tbl-wrap"><table><tr><th>Vendas e prestação de serviços</th><th style="text-align:center" colspan="2">Notas fiscais</th><th>ICMS</th><th style="text-align:center">Canceladas</th><th>R$</th></tr>';
+    s.linhas.forEach((l) => {
+      h += '<tr><td>' + esc(l.descricao) + '</td><td class="txt">' + esc(l.numero_inicial || '-') + '</td><td class="txt">' + esc(l.numero_final || '-') +
+        '</td><td>' + val(l.icms) + '</td><td class="txt">' + esc(l.canceladas.join(', ') || '-') + '</td><td>' + val(l.valor) + '</td></tr>';
+    });
+    h += '<tr class="total"><td>Total</td><td></td><td></td><td>' + val(s.total_icms) + '</td><td></td><td></td></tr>';
+    h += '<tr class="grand"><td colspan="5" style="text-align:right">Total faturamento</td><td>' + brl(s.total_faturamento) + '</td></tr></table></div>';
+    if (s.outras_saidas) h += '<div class="obs">Outras saídas sem receita (devolução, remessa, retorno): R$ ' + brl(s.outras_saidas) + '</div>';
+
+    h += '<h2>Entradas</h2><div class="tbl-wrap"><table><tr><th>Compras</th><th>ICMS</th><th>R$</th></tr>';
+    e.compras.forEach((c) => { h += '<tr><td>' + esc(c.descricao) + '</td><td>' + val(c.icms) + '</td><td>' + val(c.valor) + '</td></tr>'; });
+    h += '<tr class="total"><td>Total</td><td>' + val(e.total_icms) + '</td><td>' + val(e.total_compras) + '</td></tr></table></div>';
+
+    h += '<div class="tbl-wrap"><table style="margin-top:14px"><tr><th>Serviços</th><th>IRRF</th><th>CSRF</th><th>INSS</th><th>ISSQN</th><th>R$</th></tr>' +
+      '<tr><td>Serviços tomados (' + tom.quantidade + ')</td><td>' + val(tom.irrf) + '</td><td>' + val(tom.csrf) + '</td><td>' + val(tom.inss) + '</td><td>' + val(tom.issqn) + '</td><td>' + val(tom.valor) + '</td></tr></table></div>';
+    if (d.retencoes_a_recolher.total) h += '<div class="obs">Retenções feitas sobre serviços tomados, a recolher pela empresa: R$ ' + brl(d.retencoes_a_recolher.total) + '</div>';
+
+    if (t) {
+      h += '<h2>Tributos</h2>';
+      h += quadroTributo('Federais', t.federais, 'Retenções', t.total_federais);
+      h += quadroTributo('Estaduais', t.estaduais, 'Crédito', t.total_estaduais);
+      h += quadroTributo('Municipais', t.municipais, 'Retenções', t.total_municipais);
+      h += '<table><tr class="grand"><td style="text-align:right">Total devido</td><td style="width:140px">' + brl(t.total_devido) + '</td></tr></table>';
+
+      const c = d.valores_a_compensar;
+      h += '<h2>Valores a compensar</h2><div class="tbl-wrap"><table><tr><th></th><th>R$</th></tr>' +
+        [['PIS Faturamento', c.pis], ['COFINS Faturamento', c.cofins], ['IRPJ Presumido', c.irpj], ['CSLL Presumido', c.csll], ['ICMS', c.icms], ['ISSQN Próprio', c.issqn]]
+          .map((x) => '<tr><td>' + x[0] + '</td><td>' + val(x[1]) + '</td></tr>').join('') + '</table></div>';
+    }
+    h += '</div>';
+    return h;
+  }
+})();
+</script>
+</body>
+</html>
