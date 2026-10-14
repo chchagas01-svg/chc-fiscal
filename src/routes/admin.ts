@@ -40,10 +40,10 @@ router.post('/qyon-token', async (req, res) => {
 });
 
 // PATCH /v1/admin/empresas/:id — cadastro usado pela apuração e pelo Resumo Mensal
-// Body (todos opcionais): { inscricao_estadual, tem_difal, aliquota_iss }
+// Body (todos opcionais): { inscricao_estadual, tem_difal, aliquota_iss, aliquota_icms_interna }
 router.patch('/empresas/:id', async (req, res) => {
   const id = Number(req.params['id']);
-  const body = req.body as { inscricao_estadual?: string | null; tem_difal?: boolean; aliquota_iss?: number | null };
+  const body = req.body as { inscricao_estadual?: string | null; tem_difal?: boolean; aliquota_iss?: number | null; aliquota_icms_interna?: number };
 
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -61,13 +61,20 @@ router.patch('/empresas/:id', async (req, res) => {
     }
     params.push(aliq); sets.push(`aliquota_iss = $${params.length}`);
   }
+  if ('aliquota_icms_interna' in body) {
+    const aliq = Number(body.aliquota_icms_interna);
+    if (isNaN(aliq) || aliq <= 0 || aliq > 0.35) {
+      return res.status(400).json({ erro: 'aliquota_icms_interna deve ser decimal (ex.: 0.18 = 18%)' });
+    }
+    params.push(aliq); sets.push(`aliquota_icms_interna = $${params.length}`);
+  }
   if (sets.length === 0) return res.status(400).json({ erro: 'Nenhum campo para atualizar' });
 
   params.push(id);
   const r = await query(
     `UPDATE empresas SET ${sets.join(', ')}, atualizado_em = NOW()
       WHERE id = $${params.length}
-      RETURNING id, cnpj, nome, regime, inscricao_estadual, tem_difal, aliquota_iss`,
+      RETURNING id, cnpj, nome, regime, inscricao_estadual, tem_difal, aliquota_iss, aliquota_icms_interna`,
     params
   );
   if (!r.rows[0]) return res.status(404).json({ erro: 'Empresa não encontrada' });

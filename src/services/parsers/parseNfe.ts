@@ -80,6 +80,8 @@ export async function parseNfe(xml: string, tipoDoc: TipoDoc = 'nfe'): Promise<P
     cfop: str(dig(item, 'prod', 'CFOP') ?? ''),
     valor: num(dig(item, 'prod', 'vProd')),
     icms: icmsDoItem(item),
+    ncm: str(dig(item, 'prod', 'NCM') ?? '') || undefined,
+    ...grupoIcmsDoItem(item),
   }));
 
   // CFOP — usa o do primeiro item (NFs comerciais geralmente têm um único CFOP)
@@ -131,6 +133,8 @@ export async function parseNfe(xml: string, tipoDoc: TipoDoc = 'nfe'): Promise<P
     cancelada,
     chaveSubstituta,
     itens: itensNota,
+    ufEmitente: str(dig(emit, 'enderEmit', 'UF') ?? '') || undefined,
+    ufDestinatario: str(dig(dest, 'enderDest', 'UF') ?? '') || undefined,
     xmlRaw: xml,
   };
 }
@@ -141,4 +145,19 @@ function icmsDoItem(item: Record<string, unknown>): number {
   if (!grupo || typeof grupo !== 'object') return 0;
   return Object.values(grupo).reduce<number>((acc, g) =>
     acc + (g && typeof g === 'object' ? num((g as Record<string, unknown>)['vICMS']) : 0), 0);
+}
+
+// Base, alíquota (fração) e origem da mercadoria no grupo ICMS do item
+function grupoIcmsDoItem(item: Record<string, unknown>): { bc?: number; aliquota?: number; origem?: string } {
+  const grupo = dig(item, 'imposto', 'ICMS') as Record<string, unknown> | undefined;
+  if (!grupo || typeof grupo !== 'object') return {};
+  const g = Object.values(grupo).find(v => v && typeof v === 'object') as Record<string, unknown> | undefined;
+  if (!g) return {};
+  const origem = str(g['orig'] ?? '') || undefined;
+  const temBc = g['vBC'] != null;
+  return {
+    origem,
+    bc: temBc ? num(g['vBC']) : undefined,
+    aliquota: g['pICMS'] != null ? num(g['pICMS']) / 100 : undefined,
+  };
 }
