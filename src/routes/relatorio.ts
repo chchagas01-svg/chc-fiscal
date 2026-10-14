@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { gerarRelatorioConferencia } from '../services/relatorio/RelatorioService';
 import { relatorioRetencoes } from '../services/relatorio/RetencoesService';
+import { gerarResumoMensal } from '../services/relatorio/ResumoMensalService';
 
 const router = Router();
 
@@ -42,6 +43,24 @@ router.get('/retencoes/:competencia', async (req: Request, res: Response) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ erro: 'Falha ao gerar relatório de retenções', detalhe: msg });
+  }
+});
+
+// GET /v1/relatorio/resumo-mensal/:competencia?empresa_id=X[&ate=YYYY-MM-DD]
+// Totalizador: Resumo Mensal da empresa acumulado até a data (padrão: hoje)
+router.get('/resumo-mensal/:competencia', async (req: Request, res: Response) => {
+  const competencia = req.params['competencia'] as string;
+  const empresaId = Number(req.query['empresa_id']);
+  const ate = req.query['ate'] ? String(req.query['ate']) : undefined;
+  if (!/^\d{4}-\d{2}$/.test(competencia) || !empresaId || (ate && !/^\d{4}-\d{2}-\d{2}$/.test(ate))) {
+    res.status(400).json({ erro: 'Informe competencia (YYYY-MM), empresa_id e opcionalmente ate (YYYY-MM-DD)' });
+    return;
+  }
+  try {
+    res.json(await gerarResumoMensal(empresaId, competencia, ate));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ erro: 'Falha ao gerar Resumo Mensal', detalhe: msg });
   }
 });
 

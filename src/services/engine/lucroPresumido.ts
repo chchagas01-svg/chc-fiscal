@@ -7,6 +7,7 @@ const ALIQ_IRPJ = 0.15;     // 15%
 const ALIQ_IRPJ_ADICIONAL = 0.10; // 10% sobre base trimestral > R$60.000
 const ALIQ_CSLL = 0.09;     // 9%
 const LIMITE_ADICIONAL_IRPJ = 60_000; // R$ por trimestre
+const PRESUNCAO_CSLL_MERCADORIAS = 0.12;
 
 export type MesTrimestre = 1 | 2 | 3; // posição do mês dentro do trimestre
 
@@ -128,10 +129,10 @@ export function calcularPresumido(entrada: EntradaPresumido): ResultadoOuTravaPr
     entrada.receita_comercio * entrada.presuncao_comercio +
     entrada.receita_industria * entrada.presuncao_industria
   );
+  // CSLL: presunção da empresa só sobre serviços; venda de mercadorias/produtos é sempre 12%
   const baseCsll = r2(
     entrada.receita_servicos * entrada.presuncao_csll +
-    entrada.receita_comercio * entrada.presuncao_csll +
-    entrada.receita_industria * entrada.presuncao_csll
+    (entrada.receita_comercio + entrada.receita_industria) * PRESUNCAO_CSLL_MERCADORIAS
   );
 
   // PIS e COFINS (cumulativo — sempre mensais)
