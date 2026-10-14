@@ -2,6 +2,7 @@ import { query } from '../../config/database';
 import { calcularSimples, SaldoRetencoes } from './simplesNacional';
 import { calcularPresumido, mesDotrimestre, identificarTrimestre } from './lucroPresumido';
 import { AnexoSimples } from './tabelasSimples';
+import { CFOPS_VENDA_PRODUCAO } from './cfop';
 
 const DESVIO_MAX_HISTORICO = 0.40; // 40% — trava de segurança
 
@@ -20,6 +21,7 @@ interface EmpresaRow {
   aliquota_iss: number | null;
   folha_12meses_seed: number | null;
   rbt12_seed: number | null;
+  inscricao_estadual: string | null;
 }
 
 interface TotaisNotas {
@@ -49,7 +51,8 @@ async function buscarEmpresa(empresaId: number): Promise<EmpresaRow | null> {
   const r = await query<EmpresaRow>(
     `SELECT id, cnpj, nome, regime, anexo, anexo_comercio,
             presuncao_servicos, presuncao_comercio, presuncao_industria,
-            presuncao_irpj, presuncao_csll, aliquota_iss, folha_12meses_seed, rbt12_seed
+            presuncao_irpj, presuncao_csll, aliquota_iss, folha_12meses_seed, rbt12_seed,
+            inscricao_estadual
      FROM empresas WHERE id = $1 AND ativo = true`,
     [empresaId]
   );
@@ -72,8 +75,11 @@ async function buscarTotaisNotas(empresaId: number, competencia: string): Promis
   const r = await query(
     `SELECT
        COALESCE(SUM(valor_bruto) FILTER (WHERE natureza = 'servico_prestado' AND NOT cancelada), 0) AS receita_servicos,
-       COALESCE(SUM(valor_bruto) FILTER (WHERE natureza = 'venda' AND NOT cancelada), 0)            AS receita_comercio,
-       COALESCE(SUM(valor_bruto) FILTER (WHERE natureza = 'outro' AND tipo_doc = 'nfe' AND NOT cancelada), 0)          AS receita_industria,
+       COALESCE(SUM(valor_bruto) FILTER (WHERE natureza = 'venda' AND NOT cancelada
+                                           AND NOT (COALESCE(cfop, '') = ANY($3::text[]))), 0)  AS receita_comercio,
+       -- Venda de produção própria (CFOP 5101, 6101...). 'outro' = devolução/remessa/retorno, não é receita
+       COALESCE(SUM(valor_bruto) FILTER (WHERE natureza = 'venda' AND NOT cancelada
+                                           AND COALESCE(cfop, '') = ANY($3::text[])), 0)        AS receita_industria,
        COALESCE(SUM(ret_pis)    FILTER (WHERE natureza = 'servico_prestado' AND NOT cancelada), 0) AS ret_pis,
        COALESCE(SUM(ret_cofins) FILTER (WHERE natureza = 'servico_prestado' AND NOT cancelada), 0) AS ret_cofins,
        COALESCE(SUM(ret_csll)   FILTER (WHERE natureza = 'servico_prestado' AND NOT cancelada), 0) AS ret_csll,
@@ -85,7 +91,7 @@ async function buscarTotaisNotas(empresaId: number, competencia: string): Promis
        COUNT(*) FILTER (WHERE NOT cancelada)                                                        AS total_notas
      FROM notas
      WHERE empresa_id = $1 AND competencia = $2`,
-    [empresaId, competencia]
+    [empresaId, competencia, [...CFOPS_VENDA_PRODUCAO]]
   );
   const row = r.rows[0] ?? {};
   return {
@@ -350,7 +356,12 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
     const { base_irpj: baseAcumIrpj, base_csll: baseAcumCsll } =
       await buscarBaseAcumuladaTrimestre(empresaId, competencia, trimestre);
 
-    const icmsSaldoAnterior = Number(saldoAnt.icms_saldo_credor ?? 0);
+    // Regra do escritório: só apura ICMS quem tem Inscrição Estadual (e não é do Simples)
+    const temIcms = Boolean(empresa.inscricao_estadual?.trim());
+    if (!temIcms && (totais.icms_debito > 0 || totais.icms_credito > 0)) {
+      alertas.push('Empresa sem Inscrição Estadual cadastrada: ICMS destacado nas notas não foi apurado. Cadastrar a IE se for contribuinte.');
+    }
+    const icmsSaldoAnterior = temIcms ? Number(saldoAnt.icms_saldo_credor ?? 0) : 0;
 
     // Receita anual (12 meses anteriores + mês atual) para verificar limite do adicional IRPJ
     const rbt12Lp = await buscarRBT12(empresaId, competencia);
@@ -372,8 +383,8 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
       base_irpj_acumulada_trim: baseAcumIrpj,
       base_csll_acumulada_trim: baseAcumCsll,
       icms_saldo_anterior: icmsSaldoAnterior,
-      icms_debitos_mes:    totais.icms_debito,
-      icms_creditos_mes:   totais.icms_credito,
+      icms_debitos_mes:    temIcms ? totais.icms_debito : 0,
+      icms_creditos_mes:   temIcms ? totais.icms_credito : 0,
       retencoes_mes:       retencoesMes,
       saldo_anterior:      saldoAnt.saldo_ret_proximo,
       irpj_adicional_sobre_base_total: irpjAdicionalIntegral,

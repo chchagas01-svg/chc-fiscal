@@ -4,6 +4,7 @@ import { parseNfseAbrasf } from './parseNfseAbrasf';
 import { parseNfseSp } from './parseNfseSp';
 import { parseNfe } from './parseNfe';
 import { parseCte } from './parseCte';
+import { classificarSaida } from '../engine/cfop';
 
 // Detecta tipo de XML pela primeira tag raiz significativa
 function detectRootTag(xml: string): string {
@@ -57,4 +58,18 @@ export async function parseXml(xml: string): Promise<ParsedNota[]> {
   try { return [await parseNfseNacional(xml)]; } catch {}
 
   throw new Error(`Tipo de XML não reconhecido: tag raiz <${tag}>`);
+}
+
+// Aplica à nota a direção já conhecida (fluxo do Qyon ou CNPJ da empresa):
+// - NF-e/NFC-e de saída com CFOP de devolução, remessa ou retorno → 'outro' (não é receita)
+// - ICMS destacado vira crédito quando a nota é de compra
+export function aplicarNatureza(nota: ParsedNota, natureza: ParsedNota['natureza']): ParsedNota {
+  if (nota.tipoDoc !== 'nfe' && nota.tipoDoc !== 'nfce') return { ...nota, natureza };
+  if (natureza === 'compra') {
+    return { ...nota, natureza, icmsCredito: nota.icmsDebito, icmsDebito: 0 };
+  }
+  if (natureza === 'venda' && classificarSaida(nota.cfop) === 'nao_receita') {
+    return { ...nota, natureza: 'outro' };
+  }
+  return { ...nota, natureza };
 }

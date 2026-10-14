@@ -39,4 +39,39 @@ router.post('/qyon-token', async (req, res) => {
   return res.json({ ok: true, mensagem: 'Tokens Qyon atualizados com sucesso' });
 });
 
+// PATCH /v1/admin/empresas/:id — cadastro usado pela apuração e pelo Resumo Mensal
+// Body (todos opcionais): { inscricao_estadual, tem_difal, aliquota_iss }
+router.patch('/empresas/:id', async (req, res) => {
+  const id = Number(req.params['id']);
+  const body = req.body as { inscricao_estadual?: string | null; tem_difal?: boolean; aliquota_iss?: number | null };
+
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if ('inscricao_estadual' in body) {
+    const ie = body.inscricao_estadual ? String(body.inscricao_estadual).replace(/\D/g, '') : null;
+    params.push(ie || null); sets.push(`inscricao_estadual = $${params.length}`);
+  }
+  if ('tem_difal' in body) {
+    params.push(Boolean(body.tem_difal)); sets.push(`tem_difal = $${params.length}`);
+  }
+  if ('aliquota_iss' in body) {
+    const aliq = body.aliquota_iss == null ? null : Number(body.aliquota_iss);
+    if (aliq != null && (isNaN(aliq) || aliq < 0 || aliq > 0.05)) {
+      return res.status(400).json({ erro: 'aliquota_iss deve ser decimal entre 0 e 0.05 (ex.: 0.05 = 5%)' });
+    }
+    params.push(aliq); sets.push(`aliquota_iss = $${params.length}`);
+  }
+  if (sets.length === 0) return res.status(400).json({ erro: 'Nenhum campo para atualizar' });
+
+  params.push(id);
+  const r = await query(
+    `UPDATE empresas SET ${sets.join(', ')}, atualizado_em = NOW()
+      WHERE id = $${params.length}
+      RETURNING id, cnpj, nome, regime, inscricao_estadual, tem_difal, aliquota_iss`,
+    params
+  );
+  if (!r.rows[0]) return res.status(404).json({ erro: 'Empresa não encontrada' });
+  return res.json({ ok: true, empresa: r.rows[0] });
+});
+
 export default router;

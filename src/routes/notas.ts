@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { query } from '../config/database';
-import { parseXml } from '../services/parsers';
+import { parseXml, aplicarNatureza } from '../services/parsers';
 import { inserirNota, competenciaDaNota } from '../services/captura/CapturaService';
 import { ParsedNota } from '../types/nota';
 
@@ -47,7 +47,7 @@ router.post('/importar-xml', async (req, res) => {
           continue;
         }
         const competencia = competenciaDaNota(nota, new Date().toISOString().substring(0, 7));
-        const inserida = await inserirNota(empresa.id, competencia, { ...nota, natureza });
+        const inserida = await inserirNota(empresa.id, competencia, aplicarNatureza(nota, natureza));
         resultados.push({
           arquivo: nome, numero: nota.numero, emitente: nota.nomeEmitente, valor: nota.valorBruto,
           natureza, competencia, status: inserida ? 'importada' : 'duplicada',
