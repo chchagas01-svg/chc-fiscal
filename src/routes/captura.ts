@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { capturar } from '../services/captura/CapturaService';
 import { query } from '../config/database';
+import { gravarResumosDoDia } from '../services/relatorio/ResumoMensalService';
 
 const router = Router();
 
@@ -26,6 +27,9 @@ router.post('/importar', async (req: Request, res: Response) => {
     const semMovimento = resultados.filter(r => r.status === 'sem_movimento').length;
     const erros = resultados.filter(r => r.status === 'erro').length;
 
+    // Totalizador: logo após a captura, grava o Resumo Mensal do dia de cada empresa capturada
+    const resumos = await gravarResumosDoDia(comp, resultados.filter(r => r.status !== 'erro').map(r => r.empresa_id));
+
     res.json({
       competencia: comp,
       resumo: {
@@ -45,6 +49,7 @@ router.post('/importar', async (req: Request, res: Response) => {
         duplicatas_ignoradas: r.notas_ignoradas_duplicatas,
         erros: r.erros.length > 0 ? r.erros : undefined,
       })),
+      resumos_mensais: resumos,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
