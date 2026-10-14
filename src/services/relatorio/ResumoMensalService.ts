@@ -373,8 +373,11 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
   const empresa = empRes.rows[0];
   if (!empresa) throw new Error('Empresa não encontrada');
 
+  // Padrão: hoje, limitado ao último dia da competência (captura do mês anterior no dia 01)
   const hoje = new Date().toISOString().substring(0, 10);
-  const apuradoAte = ate ?? hoje;
+  const [anoC, mesC] = competencia.split('-').map(Number);
+  const ultimoDiaComp = new Date(Date.UTC(anoC!, mesC!, 0)).toISOString().substring(0, 10);
+  const apuradoAte = ate ?? (hoje < ultimoDiaComp ? hoje : ultimoDiaComp);
 
   const notasRes = await query<Record<string, unknown>>(
     `SELECT tipo_doc, numero, serie, natureza, cfop, valor_bruto, iss_retido, valor_iss,
@@ -423,4 +426,44 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
     retencoes: { pis: Number(ret.pis ?? 0), cofins: Number(ret.cofins ?? 0), csll: Number(ret.csll ?? 0), irrf: Number(ret.irrf ?? 0) },
     base_irpj_trimestre_anterior: Number(trimRes.rows[0]?.['base'] ?? 0),
   });
+}
+
+// ── Rotina diária: grava o resumo de cada empresa depois da captura ─────────────
+
+export interface ResumoGravado {
+  empresa_id: number;
+  nome: string;
+  status: 'ok' | 'erro';
+  apurado_ate?: string;
+  total_faturamento?: number;
+  total_devido?: number | null;
+  alertas?: number;
+  erro?: string;
+}
+
+export async function gravarResumosDoDia(competencia: string, empresaIds: number[]): Promise<ResumoGravado[]> {
+  const saida: ResumoGravado[] = [];
+  for (const id of empresaIds) {
+    try {
+      const r = await gerarResumoMensal(id, competencia);
+      await query(
+        `INSERT INTO resumos_mensais (empresa_id, competencia, apurado_ate, mes_fechado, total_faturamento, total_devido, qtd_alertas, dados)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (empresa_id, competencia, apurado_ate) DO UPDATE SET
+           mes_fechado = EXCLUDED.mes_fechado, total_faturamento = EXCLUDED.total_faturamento,
+           total_devido = EXCLUDED.total_devido, qtd_alertas = EXCLUDED.qtd_alertas,
+           dados = EXCLUDED.dados, gerado_em = NOW()`,
+        [id, competencia, r.apurado_ate, r.mes_fechado, r.saidas.total_faturamento,
+         r.tributos?.total_devido ?? null, r.alertas.length, JSON.stringify(r)]
+      );
+      saida.push({ empresa_id: id, nome: r.empresa.nome, status: 'ok', apurado_ate: r.apurado_ate,
+        total_faturamento: r.saidas.total_faturamento, total_devido: r.tributos?.total_devido ?? null,
+        alertas: r.alertas.length });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[resumo] empresa ${id} ${competencia}: ${msg}`);
+      saida.push({ empresa_id: id, nome: '', status: 'erro', erro: msg });
+    }
+  }
+  return saida;
 }
