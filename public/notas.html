@@ -529,6 +529,7 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
               <th class="num">Valor Bruto</th>
               <th class="num">ICMS Créd.</th>
               <th class="num">Valor Líquido</th>
+              <th title="Finalidade da compra no Resumo Mensal e no Difal">Finalidade</th>
               <th>Status</th>
               <th></th>
             </tr>
@@ -804,6 +805,7 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
             '<td class="num val-bruto">' + fmtR(bruto) + '</td>' +
             '<td class="num">' + (icms > 0 ? fmtR(icms) : '—') + '</td>' +
             '<td class="num">' + fmtR(liq) + '</td>' +
+            (tipo === 'compras' ? '<td>' + seletorFinalidade(n) + '</td>' : '') +
             '<td>' + status + '</td>' + acoes;
         }
 
@@ -836,6 +838,7 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
           '<td class="num">' + fmtR(somaBruto) + '</td>' +
           '<td class="num">' + fmtR(somaIcms) + '</td>' +
           '<td class="num">' + fmtR(somaLiq) + '</td>' +
+          (tipo === 'compras' ? '<td></td>' : '') +
           '<td></td><td></td>' +
           '</tr>';
       }
@@ -844,6 +847,30 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
     refazer();
     chk.onchange = refazer;
   }
+
+  // ── Finalidade da compra (Resumo Mensal / Difal) ────
+  // Vazio = deduzida do CFOP do fornecedor; marcar aqui quando o CFOP não reflete o uso
+  const FINALIDADES = [['', 'Pelo CFOP'], ['revenda', 'Revenda'], ['industrializacao', 'Industrialização'],
+    ['ativo', 'Ativo imobilizado'], ['outras', 'Uso e consumo']];
+  function seletorFinalidade(n) {
+    if (n.tipo_doc !== 'nfe') return '—';
+    return '<select class="sel-finalidade" data-id="' + n.id + '" style="font:inherit;font-size:12px;padding:2px 4px">' +
+      FINALIDADES.map(function (f) {
+        return '<option value="' + f[0] + '"' + ((n.finalidade_entrada || '') === f[0] ? ' selected' : '') + '>' + f[1] + '</option>';
+      }).join('') + '</select>';
+  }
+  document.getElementById('painel-compras').addEventListener('change', async function (e) {
+    const sel = e.target.closest('.sel-finalidade');
+    if (!sel) return;
+    try {
+      const r = await fetch('/v1/notas/' + sel.dataset.id, {
+        method: 'PATCH', headers: headers(),
+        body: JSON.stringify({ finalidade_entrada: sel.value || null })
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      toast('Finalidade atualizada', 'ok');
+    } catch (err) { toast('Erro: ' + err.message, 'err'); }
+  });
 
   // ── Tabs ───────────────────────────────────────────
   document.querySelectorAll('.tab').forEach(function (btn) {

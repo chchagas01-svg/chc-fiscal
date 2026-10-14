@@ -244,12 +244,21 @@ table.horiz th:first-child, table.horiz td:first-child { text-align: right; font
       [['Valor dos serviços', tom.valor], ['IRRF retido', tom.irrf], ['CSRF retida (PIS/COFINS/CSLL)', tom.csrf], ['INSS retido', tom.inss], ['ISSQN retido', tom.issqn]]
         .map((x) => '<tr><td>' + x[0] + '</td><td>' + val(x[1]) + '</td></tr>').join('') +
       '<tr class="total"><td>Retenções a recolher</td><td>' + val(d.retencoes_a_recolher.total) + '</td></tr></table></div></div></div>';
+    const dif = e.difal;
+    if (dif && dif.notas.length) {
+      h += '<h3>Difal — compras de outra UF (uso/consumo e ativo)</h3><div class="tbl-wrap"><table><tr><th>NF</th><th style="text-align:left">Fornecedor</th><th>UF</th><th style="text-align:left">Finalidade</th><th>Base</th><th>Alíq. inter.</th><th>Alíq. interna</th><th>Difal</th></tr>' +
+        dif.notas.map((n) => '<tr><td>' + esc(n.numero || '-') + '</td><td style="text-align:left;white-space:normal;font-family:inherit">' + esc(n.emitente || '') +
+          '</td><td class="txt">' + esc(n.uf_origem) + '</td><td style="text-align:left;font-family:inherit">' + (n.finalidade === 'ativo' ? 'Ativo' : 'Uso e consumo') +
+          '</td><td>' + val(n.base) + '</td><td>' + pct(n.aliquota_interestadual) + '</td><td>' + pct(n.aliquota_interna) + '</td><td>' + val(n.difal) + '</td></tr>').join('') +
+        '<tr class="total"><td colspan="7">Total Difal</td><td>' + val(dif.total) + '</td></tr></table></div>';
+    }
 
     if (t) {
       h += '<h2>Tributos</h2>';
       h += quadroTributo('Federais', t.federais, 'Retenções', t.total_federais);
-      h += '<div class="lado"><div>' + quadroTributo('Estaduais', t.estaduais, 'Crédito', t.total_estaduais) + '</div><div>' +
-        quadroTributo('Municipais', t.municipais, 'Retenções', t.total_municipais) + '</div></div>';
+      const qEst = quadroTributo('Estaduais', t.estaduais, 'Crédito', t.total_estaduais);
+      const qMun = quadroTributo('Municipais', t.municipais, 'Retenções', t.total_municipais);
+      h += qEst && qMun ? '<div class="lado"><div>' + qEst + '</div><div>' + qMun + '</div></div>' : qEst + qMun;
       h += '<table><tr class="grand"><td style="text-align:right">Total devido</td><td style="width:140px">' + brl(t.total_devido) + '</td></tr></table>';
 
       const c = d.valores_a_compensar;

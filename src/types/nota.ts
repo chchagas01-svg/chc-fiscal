@@ -30,6 +30,9 @@ export interface ParsedNota {
   cancelada: boolean;
   chaveSubstituta?: string;
   // NF-e: itens com CFOP, valor do produto e ICMS (não gravados; derivados do xml_raw quando preciso)
-  itens?: { cfop: string; valor: number; icms: number }[];
+  // bc/aliquota/origem: base, alíquota e origem do ICMS do item (Difal das compras interestaduais)
+  itens?: { cfop: string; valor: number; icms: number; ncm?: string; bc?: number; aliquota?: number; origem?: string }[];
+  ufEmitente?: string;
+  ufDestinatario?: string;
   xmlRaw: string;
 }

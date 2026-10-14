@@ -13,6 +13,7 @@ import { query } from '../../config/database';
 import { parseXml } from '../parsers';
 import { classificarEntrada, cfopDeEntrada, classificarSaida, FinalidadeEntrada } from '../engine/cfop';
 import { identificarTrimestre } from '../engine/lucroPresumido';
+import { calcularDifalItem } from '../engine/difal';
 
 const ALIQ_PIS = 0.0065;
 const ALIQ_COFINS = 0.03;
@@ -39,6 +40,8 @@ export interface EmpresaResumo {
   presuncao_irpj: number | null;
   presuncao_csll: number | null;
   aliquota_iss: number | null;
+  uf: string | null;
+  aliquota_icms_interna: number | null;
 }
 
 export interface NotaResumo {
@@ -58,8 +61,26 @@ export interface NotaResumo {
   icms_debito: number;
   icms_credito: number;
   cancelada: boolean;
-  // Compras de NF-e: itens lidos do XML (CFOP do fornecedor, valor, ICMS)
-  itens?: { cfop: string; valor: number; icms: number }[];
+  id?: number;
+  nome_emitente?: string | null;
+  // Finalidade da compra definida no painel (vale para a nota inteira); NULL = pelo CFOP
+  finalidade_entrada?: FinalidadeEntrada | null;
+  uf_emitente?: string;
+  // Compras de NF-e: itens lidos do XML (CFOP do fornecedor, valor, ICMS, base/alíquota/origem)
+  itens?: { cfop: string; valor: number; icms: number; bc?: number; aliquota?: number; origem?: string }[];
+}
+
+export interface NotaDifal {
+  nota_id?: number;
+  numero: string | null;
+  emitente: string | null;
+  uf_origem: string;
+  finalidade: FinalidadeEntrada;
+  finalidade_pelo_painel: boolean;
+  base: number;
+  aliquota_interestadual: number;
+  aliquota_interna: number;
+  difal: number;
 }
 
 export interface SaldosAnteriores {
@@ -106,6 +127,8 @@ export interface ResumoMensal {
     servicos_tomados: {
       quantidade: number; valor: number; irrf: number; csrf: number; inss: number; issqn: number;
     };
+    // Compras interestaduais para uso/consumo e ativo (base da DeSTDA, registro G605 indicador 3)
+    difal: { aplicavel: boolean; total: number; notas: NotaDifal[] };
   };
   tributos: {
     federais: LinhaTributo[];
@@ -206,12 +229,37 @@ export function montarResumo(
     revenda: { icms: 0, valor: 0 }, industrializacao: { icms: 0, valor: 0 },
     ativo: { icms: 0, valor: 0 }, outras: { icms: 0, valor: 0 },
   };
+  // Difal: empresa marcada, com IE (Simples ou não), compra de outra UF para ativo ou uso/consumo
+  const difalAplicavel = empresa.tem_difal && Boolean(empresa.inscricao_estadual?.trim());
+  const ufEmpresa = (empresa.uf ?? 'SP').toUpperCase();
+  const aliqInterna = empresa.aliquota_icms_interna ?? 0.18;
+  const notasDifal: NotaDifal[] = [];
+  const possiveisDifal: string[] = [];
+
   for (const c of compras) {
     const itens = c.itens?.length ? c.itens : [{ cfop: c.cfop ?? '', valor: c.valor_bruto, icms: c.icms_credito }];
+    const interestadual = Boolean(c.uf_emitente) && c.uf_emitente!.toUpperCase() !== ufEmpresa;
+    const difalPorFinalidade: Partial<Record<FinalidadeEntrada, { base: number; difal: number; aliq: number }>> = {};
     for (const it of itens) {
-      const f = classificarEntrada(cfopDeEntrada(it.cfop));
+      const f = c.finalidade_entrada ?? classificarEntrada(cfopDeEntrada(it.cfop));
+      if (difalAplicavel && interestadual) {
+        const d = calcularDifalItem(it, c.uf_emitente!.toUpperCase(), ufEmpresa, aliqInterna);
+        const acc = difalPorFinalidade[f] ?? { base: 0, difal: 0, aliq: d.aliquota_interestadual };
+        acc.base += d.base; acc.difal += d.difal;
+        difalPorFinalidade[f] = acc;
+      }
       porFinalidade[f].valor += it.valor;
       porFinalidade[f].icms += it.icms;
+    }
+    for (const [f, d] of Object.entries(difalPorFinalidade) as [FinalidadeEntrada, { base: number; difal: number; aliq: number }][]) {
+      if (f === 'ativo' || f === 'outras') {
+        notasDifal.push({ nota_id: c.id, numero: c.numero, emitente: c.nome_emitente ?? null, uf_origem: c.uf_emitente!.toUpperCase(),
+          finalidade: f, finalidade_pelo_painel: Boolean(c.finalidade_entrada), base: r2(d.base),
+          aliquota_interestadual: d.aliq, aliquota_interna: aliqInterna, difal: r2(d.difal) });
+      } else if (!c.finalidade_entrada && d.difal > 0) {
+        // Pelo CFOP do fornecedor parece revenda/industrialização: pode ser ativo ou consumo
+        possiveisDifal.push(`NF ${c.numero ?? '?'} de ${c.nome_emitente ?? 'fornecedor'} (${c.uf_emitente}) — R$ ${d.difal.toFixed(2)}`);
+      }
     }
   }
   // Uso e consumo ("outras") não dá crédito de ICMS
@@ -226,6 +274,14 @@ export function montarResumo(
     valor: r2(porFinalidade[f].valor),
   }));
   const icmsCredito = r2(linhasCompra.reduce((s, l) => s + l.icms, 0));
+  const difalTotal = r2(notasDifal.reduce((s, n) => s + n.difal, 0));
+  if (possiveisDifal.length) {
+    alertas.push(`Compras de outra UF classificadas como revenda/industrialização pelo CFOP do fornecedor. Se forem uso/consumo ou ativo, marque a finalidade no painel para entrar no Difal: ${possiveisDifal.join('; ')}.`);
+  }
+  if (empresa.tem_difal && !difalAplicavel) alertas.push('Empresa marcada com Difal, mas sem Inscrição Estadual: Difal não calculado.');
+  const linhaDifal: LinhaTributo = { tributo: 'Difal (uso/consumo e ativo)', aliquota: null,
+    base: r2(notasDifal.reduce((s, n) => s + n.base, 0)), apurado: difalTotal, deducoes: 0, a_recolher: difalTotal,
+    observacao: notasDifal.length ? `${notasDifal.length} nota(s) de outra UF; alíquota interna ${(aliqInterna * 100).toFixed(0)}%.` : undefined };
 
   // ── Serviços tomados (retenções feitas pela empresa → a recolher) ──
   const tomados = notas.filter(n => n.natureza === 'servico_tomado' && !n.cancelada);
@@ -253,14 +309,20 @@ export function montarResumo(
     saidas: { linhas: linhasSaida, total_icms: icmsDebito, total_faturamento: faturamento,
       outras_saidas: r2(outrasSaidas.reduce((s, n) => s + n.valor_bruto, 0)) },
     entradas: { compras: linhasCompra, total_icms: icmsCredito,
-      total_compras: r2(linhasCompra.reduce((s, l) => s + l.valor, 0)), servicos_tomados: tom },
+      total_compras: r2(linhasCompra.reduce((s, l) => s + l.valor, 0)), servicos_tomados: tom,
+      difal: { aplicavel: difalAplicavel, total: difalTotal, notas: notasDifal } },
     retencoes_a_recolher: retencoesARecolher,
   };
 
   if (empresa.regime === 'simples') {
     alertas.push('Simples Nacional: tributos apurados pelo DAS (módulo de apuração), não por este quadro.');
-    return { ...resumoBase, tributos: null,
-      valores_a_compensar: { pis: 0, cofins: 0, irpj: 0, csll: 0, icms: 0, issqn: 0 }, alertas };
+    const valoresZerados = { pis: 0, cofins: 0, irpj: 0, csll: 0, icms: 0, issqn: 0 };
+    if (!difalAplicavel) return { ...resumoBase, tributos: null, valores_a_compensar: valoresZerados, alertas };
+    // Simples com IE: o ICMS fora do DAS (Difal) sai neste quadro e vai para a DeSTDA
+    return { ...resumoBase, tributos: {
+      federais: [], estaduais: [linhaDifal], municipais: [],
+      total_federais: 0, total_estaduais: difalTotal, total_municipais: 0, total_devido: difalTotal,
+    }, valores_a_compensar: valoresZerados, alertas };
   }
 
   // ── Tributos federais (Lucro Presumido cumulativo) ──
@@ -320,11 +382,7 @@ export function montarResumo(
     estaduais.push({ tributo: 'ICMS', aliquota: null, base: faturamento, apurado: icmsDebito, deducoes: creditos,
       a_recolher: r2(Math.max(0, saldo)),
       observacao: saldos.icms_saldo_credor > 0 ? `Inclui saldo credor anterior de R$ ${saldos.icms_saldo_credor.toFixed(2)}.` : undefined });
-    if (empresa.tem_difal) {
-      estaduais.push({ tributo: 'Difal', aliquota: null, base: 0, apurado: 0, deducoes: 0, a_recolher: 0,
-        observacao: 'Cálculo do Difal ainda não automatizado — conferir manualmente.' });
-      alertas.push('Empresa marcada com Difal: cálculo ainda não automatizado.');
-    }
+    if (difalAplicavel) estaduais.push(linhaDifal);
   } else if (notas.some(n => n.icms_debito > 0 || n.icms_credito > 0)) {
     alertas.push('Há ICMS destacado nas notas, mas a empresa não tem Inscrição Estadual cadastrada: ICMS não apurado.');
   }
@@ -366,7 +424,8 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
     `SELECT id, cnpj, nome, regime, inscricao_estadual, tem_difal,
             presuncao_servicos::float AS presuncao_servicos, presuncao_comercio::float AS presuncao_comercio,
             presuncao_industria::float AS presuncao_industria, presuncao_irpj::float AS presuncao_irpj,
-            presuncao_csll::float AS presuncao_csll, aliquota_iss::float AS aliquota_iss
+            presuncao_csll::float AS presuncao_csll, aliquota_iss::float AS aliquota_iss,
+            uf, aliquota_icms_interna::float AS aliquota_icms_interna
        FROM empresas WHERE id = $1`,
     [empresaId]
   );
@@ -380,7 +439,7 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
   const apuradoAte = ate ?? (hoje < ultimoDiaComp ? hoje : ultimoDiaComp);
 
   const notasRes = await query<Record<string, unknown>>(
-    `SELECT tipo_doc, numero, serie, natureza, cfop, valor_bruto, iss_retido, valor_iss,
+    `SELECT id, nome_emitente, finalidade_entrada, tipo_doc, numero, serie, natureza, cfop, valor_bruto, iss_retido, valor_iss,
             ret_pis, ret_cofins, ret_csll, ret_irrf, ret_inss, icms_debito, icms_credito, cancelada,
             CASE WHEN natureza = 'compra' AND tipo_doc IN ('nfe','nfce') THEN xml_raw END AS xml_raw
        FROM notas
@@ -398,9 +457,15 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
       ret_irrf: Number(row['ret_irrf'] ?? 0), ret_inss: Number(row['ret_inss'] ?? 0),
       icms_debito: Number(row['icms_debito'] ?? 0), icms_credito: Number(row['icms_credito'] ?? 0),
       cancelada: Boolean(row['cancelada']),
+      id: Number(row['id']), nome_emitente: row['nome_emitente'] as string | null,
+      finalidade_entrada: (row['finalidade_entrada'] as FinalidadeEntrada | null) ?? null,
     };
     if (row['xml_raw']) {
-      try { n.itens = (await parseXml(String(row['xml_raw'])))[0]?.itens; } catch { /* usa totais da nota */ }
+      try {
+        const parsed = (await parseXml(String(row['xml_raw'])))[0];
+        n.itens = parsed?.itens;
+        n.uf_emitente = parsed?.ufEmitente;
+      } catch { /* usa totais da nota */ }
     }
     notas.push(n);
   }

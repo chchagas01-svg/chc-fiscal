@@ -129,7 +129,7 @@ router.get('/', async (req, res) => {
        valor_bruto, valor_deducoes, valor_liquido,
        iss_retido, valor_iss,
        ret_pis, ret_cofins, ret_csll, ret_irrf, ret_inss,
-       icms_debito, icms_credito,
+       icms_debito, icms_credito, finalidade_entrada,
        cancelada, importado_em
      FROM notas
      WHERE empresa_id = $1 AND competencia = $2
@@ -362,11 +362,17 @@ router.patch('/:id', async (req, res) => {
     'iss_retido', 'valor_iss',
     'ret_pis', 'ret_cofins', 'ret_csll', 'ret_irrf', 'ret_inss',
     'icms_debito', 'icms_credito', 'cancelada', 'cfop', 'competencia', 'retencao_manual',
+    'finalidade_entrada',
   ] as const;
 
   // Retenção editada à mão fica protegida do reprocessamento do XML (a menos que venha retencao_manual=false)
   const camposRet = ['ret_pis', 'ret_cofins', 'ret_csll', 'ret_irrf', 'ret_inss'];
   if (camposRet.some(k => k in req.body) && !('retencao_manual' in req.body)) req.body.retencao_manual = true;
+
+  // Finalidade da compra (Resumo Mensal/Difal): revenda, industrializacao, ativo, outras (uso/consumo) ou null
+  if ('finalidade_entrada' in req.body && req.body.finalidade_entrada != null &&
+      !['revenda', 'industrializacao', 'ativo', 'outras'].includes(String(req.body.finalidade_entrada)))
+    return res.status(400).json({ erro: 'finalidade_entrada deve ser revenda, industrializacao, ativo, outras ou null' });
 
   if ('competencia' in req.body && !/^\d{4}-\d{2}$/.test(String(req.body.competencia)))
     return res.status(400).json({ erro: 'competencia deve estar no formato YYYY-MM' });
