@@ -69,6 +69,10 @@ tr.total td { font-weight: 600; border-top: 1px solid var(--fg); border-bottom: 
 tr.grand td { font-weight: 600; font-size: 15px; color: var(--accent); border: none; padding-top: 12px; }
 .obs { font-size: 11px; color: var(--fg-2); font-family: inherit; }
 .neg { color: var(--err); }
+.lado { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; align-items: start; }
+.lado > div { min-width: 0; }
+table.horiz th, table.horiz td { text-align: right; }
+table.horiz th:first-child, table.horiz td:first-child { text-align: right; font-family: 'IBM Plex Mono', monospace; }
 .alertas { background: var(--warn-s); border: 1px solid var(--warn); border-radius: var(--r); padding: 12px 16px; margin-bottom: 18px; color: var(--warn); font-size: 13px; }
 .alertas ul { padding-left: 18px; margin-top: 4px; }
 .selo { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 5px; background: var(--accent-s); color: var(--accent); margin-left: 6px; }
@@ -78,9 +82,23 @@ tr.grand td { font-weight: 600; font-size: 15px; color: var(--accent); border: n
   header, .filters, #login-screen { display: none !important; }
   .content { padding: 0; max-width: none; }
   .relatorio { border: none; padding: 0; }
-  .alertas { break-inside: avoid; }
-  @page { size: A4; margin: 14mm; }
+  /* Tudo numa folha A4: tipografia e espaçamentos compactos */
+  body { font-size: 9.5pt; line-height: 1.3; }
+  .rel-head { padding-bottom: 4px; margin-bottom: 6px; }
+  .rel-head h1 { font-size: 12pt; }
+  h2 { font-size: 9.5pt; margin: 10px 0 3px; }
+  h3 { font-size: 7.5pt; margin: 4px 0 1px; }
+  table { font-size: 9pt; }
+  th { font-size: 7pt; padding: 2px 4px; }
+  td { padding: 2.5px 4px; }
+  tr.grand td { font-size: 9pt; padding-top: 3px; }
+  .obs { font-size: 7pt; line-height: 1.15; }
+  .alertas { break-inside: avoid; padding: 4px 8px; margin-bottom: 6px; font-size: 7.5pt; }
+  .alertas ul { margin-top: 0; }
+  .lado { gap: 0 14px; }
+  @page { size: A4; margin: 10mm; }
 }
+@media screen and (max-width: 700px) { .lado { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .relatorio { padding: 18px 14px; } .content { padding: 16px; } }
 </style>
 </head>
@@ -217,25 +235,27 @@ tr.grand td { font-weight: 600; font-size: 15px; color: var(--accent); border: n
     h += '<tr class="grand"><td colspan="5" style="text-align:right">Total faturamento</td><td>' + brl(s.total_faturamento) + '</td></tr></table></div>';
     if (s.outras_saidas) h += '<div class="obs">Outras saídas sem receita (devolução, remessa, retorno): R$ ' + brl(s.outras_saidas) + '</div>';
 
-    h += '<h2>Entradas</h2><div class="tbl-wrap"><table><tr><th>Compras</th><th>ICMS</th><th>R$</th></tr>';
+    h += '<h2>Entradas</h2><div class="lado"><div class="tbl-wrap"><table><tr><th>Compras</th><th>ICMS</th><th>R$</th></tr>';
     e.compras.forEach((c) => { h += '<tr><td>' + esc(c.descricao) + '</td><td>' + val(c.icms) + '</td><td>' + val(c.valor) + '</td></tr>'; });
     h += '<tr class="total"><td>Total</td><td>' + val(e.total_icms) + '</td><td>' + val(e.total_compras) + '</td></tr></table></div>';
 
-    h += '<div class="tbl-wrap"><table style="margin-top:14px"><tr><th>Serviços</th><th>IRRF</th><th>CSRF</th><th>INSS</th><th>ISSQN</th><th>R$</th></tr>' +
-      '<tr><td>Serviços tomados (' + tom.quantidade + ')</td><td>' + val(tom.irrf) + '</td><td>' + val(tom.csrf) + '</td><td>' + val(tom.inss) + '</td><td>' + val(tom.issqn) + '</td><td>' + val(tom.valor) + '</td></tr></table></div>';
-    if (d.retencoes_a_recolher.total) h += '<div class="obs">Retenções feitas sobre serviços tomados, a recolher pela empresa: R$ ' + brl(d.retencoes_a_recolher.total) + '</div>';
+    // Serviços tomados: retenções na vertical para caber ao lado das compras
+    h += '<div><div class="tbl-wrap"><table><tr><th>Serviços tomados (' + tom.quantidade + ')</th><th>R$</th></tr>' +
+      [['Valor dos serviços', tom.valor], ['IRRF retido', tom.irrf], ['CSRF retida (PIS/COFINS/CSLL)', tom.csrf], ['INSS retido', tom.inss], ['ISSQN retido', tom.issqn]]
+        .map((x) => '<tr><td>' + x[0] + '</td><td>' + val(x[1]) + '</td></tr>').join('') +
+      '<tr class="total"><td>Retenções a recolher</td><td>' + val(d.retencoes_a_recolher.total) + '</td></tr></table></div></div></div>';
 
     if (t) {
       h += '<h2>Tributos</h2>';
       h += quadroTributo('Federais', t.federais, 'Retenções', t.total_federais);
-      h += quadroTributo('Estaduais', t.estaduais, 'Crédito', t.total_estaduais);
-      h += quadroTributo('Municipais', t.municipais, 'Retenções', t.total_municipais);
+      h += '<div class="lado"><div>' + quadroTributo('Estaduais', t.estaduais, 'Crédito', t.total_estaduais) + '</div><div>' +
+        quadroTributo('Municipais', t.municipais, 'Retenções', t.total_municipais) + '</div></div>';
       h += '<table><tr class="grand"><td style="text-align:right">Total devido</td><td style="width:140px">' + brl(t.total_devido) + '</td></tr></table>';
 
       const c = d.valores_a_compensar;
-      h += '<h2>Valores a compensar</h2><div class="tbl-wrap"><table><tr><th></th><th>R$</th></tr>' +
-        [['PIS Faturamento', c.pis], ['COFINS Faturamento', c.cofins], ['IRPJ Presumido', c.irpj], ['CSLL Presumido', c.csll], ['ICMS', c.icms], ['ISSQN Próprio', c.issqn]]
-          .map((x) => '<tr><td>' + x[0] + '</td><td>' + val(x[1]) + '</td></tr>').join('') + '</table></div>';
+      const comp = [['PIS', c.pis], ['COFINS', c.cofins], ['IRPJ', c.irpj], ['CSLL', c.csll], ['ICMS', c.icms], ['ISSQN', c.issqn]];
+      h += '<h2>Valores a compensar</h2><div class="tbl-wrap"><table class="horiz"><tr>' + comp.map((x) => '<th>' + x[0] + '</th>').join('') +
+        '</tr><tr>' + comp.map((x) => '<td>' + val(x[1]) + '</td>').join('') + '</tr></table></div>';
     }
     h += '</div>';
     return h;
