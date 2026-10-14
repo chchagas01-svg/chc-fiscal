@@ -29,5 +29,7 @@ export interface ParsedNota {
   icmsCredito: number;
   cancelada: boolean;
   chaveSubstituta?: string;
+  // NF-e: itens com CFOP, valor do produto e ICMS (não gravados; derivados do xml_raw quando preciso)
+  itens?: { cfop: string; valor: number; icms: number }[];
   xmlRaw: string;
 }

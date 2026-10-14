@@ -1,6 +1,6 @@
 import { query } from '../../config/database';
 import { qyonClient } from '../qyon/QyonClient';
-import { parseXml } from '../parsers';
+import { parseXml, aplicarNatureza } from '../parsers';
 import { TipoDoc, ParsedNota } from '../../types/nota';
 
 function naturezaPorFluxo(tipo: TipoDoc, fluxo: 1 | 2): ParsedNota['natureza'] {
@@ -171,10 +171,7 @@ async function capturarEmpresa(
           // Inserção — ON CONFLICT DO NOTHING garante idempotência
           for (const nota of notas) {
             // Qyon informa a direção (1=Entrada, 2=Saída); o parser não tem essa info
-            const notaComNatureza: ParsedNota = {
-              ...nota,
-              natureza: naturezaPorFluxo(tipo, item.fluxo),
-            };
+            const notaComNatureza: ParsedNota = aplicarNatureza(nota, naturezaPorFluxo(tipo, item.fluxo));
 
             // Demais documentos seguem o mês de emissão (= mês da busca)
             const compNota = tipo === 'nfse' ? competenciaDaNota(nota, competencia) : competencia;
