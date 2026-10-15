@@ -47,6 +47,8 @@ export interface ResultadoEmpresa {
   status: 'ok' | 'erro' | 'sem_movimento';
   notas_importadas: number;
   notas_ignoradas_duplicatas: number;
+  // Onde estão as notas que vieram como duplicata, ex.: { "2026-09": 80, "2026-08 (cancelada)": 2, "outra empresa": 1 }
+  duplicatas_onde: Record<string, number>;
   tipos_processados: TipoDoc[];
   erros: string[];
 }
@@ -78,6 +80,17 @@ async function registrarAudit(
      VALUES ($1, $2, $3, $4, $5)`,
     [competencia, empresaId, acao, JSON.stringify(payload), resultado]
   );
+}
+
+// Para uma nota que já existia: diz em que competência ela está gravada,
+// se está cancelada e se pertence a outra empresa (chave_acesso é única no banco todo)
+export async function localizarDuplicata(empresaId: number, chave: string): Promise<string> {
+  const r = await query<{ empresa_id: number; competencia: string; cancelada: boolean }>(
+    `SELECT empresa_id, competencia, cancelada FROM notas WHERE chave_acesso = $1`, [chave]);
+  const row = r.rows[0];
+  if (!row) return 'não localizada';
+  if (Number(row.empresa_id) !== empresaId) return 'outra empresa';
+  return row.cancelada ? `${row.competencia} (cancelada)` : row.competencia;
 }
 
 // Retorna true se inserida, false se já existia (duplicata silenciosa)
@@ -127,6 +140,7 @@ async function capturarEmpresa(
     status: 'ok',
     notas_importadas: 0,
     notas_ignoradas_duplicatas: 0,
+    duplicatas_onde: {},
     tipos_processados: [],
     erros: [],
   };
@@ -184,7 +198,11 @@ async function capturarEmpresa(
                 { numero: nota.numero, chave: nota.chaveAcesso, capturada_em: competencia }, 'lancada');
             }
             if (inserida) resultado.notas_importadas++;
-            else resultado.notas_ignoradas_duplicatas++;
+            else {
+              resultado.notas_ignoradas_duplicatas++;
+              const onde = await localizarDuplicata(empresa.id, notaComNatureza.chaveAcesso);
+              resultado.duplicatas_onde[onde] = (resultado.duplicatas_onde[onde] ?? 0) + 1;
+            }
           }
         } catch (itemErr) {
           // Isola falha de 1 documento para não travar os demais
@@ -217,12 +235,16 @@ async function capturarEmpresa(
     `erros=${resultado.erros.length} status=${resultado.status}` +
     (resultado.erros.length > 0 ? ` | ${resultado.erros.slice(0, 3).join(' | ')}` : '')
   );
+  if (resultado.notas_ignoradas_duplicatas > 0) {
+    const onde = Object.entries(resultado.duplicatas_onde).map(([k, n]) => `${k}: ${n}`).join(', ');
+    console.log(`[captura] ${empresa.cnpj} duplicatas já gravadas em → ${onde}`);
+  }
 
   await registrarAudit(
     competencia,
     empresa.id,
     'captura_concluida',
-    { importadas: resultado.notas_importadas, duplicatas: resultado.notas_ignoradas_duplicatas },
+    { importadas: resultado.notas_importadas, duplicatas: resultado.notas_ignoradas_duplicatas, duplicatas_onde: resultado.duplicatas_onde },
     resultado.status
   );
 
@@ -260,6 +282,7 @@ export async function capturar(competencia: string, cnpjs?: string[]): Promise<R
             status: 'erro' as const,
             notas_importadas: 0,
             notas_ignoradas_duplicatas: 0,
+            duplicatas_onde: {},
             tipos_processados: [],
             erros: [msg],
           };
