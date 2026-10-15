@@ -270,6 +270,7 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
     <button class="btn-nova" id="btn-nova-nota" style="align-self:flex-end" disabled>+ Nova Nota</button>
     <button class="btn-nova" id="btn-importar-xml" style="align-self:flex-end" disabled title="Importa NFS-e/NF-e avulsas; a competência vem do próprio XML">Importar XML</button>
     <input type="file" id="inp-xml" accept=".xml,text/xml" multiple style="display:none">
+    <button class="btn-nova" id="btn-cancelar-copias" style="align-self:flex-end" disabled title="Cancela as cópias da mesma NFS-e (mesmo emitente, número, data e valor) que entraram com chaves diferentes">Cancelar cópias duplicadas</button>
     <button class="btn-nova" id="btn-excluir-mes" style="align-self:flex-end;background:var(--err)" disabled>Excluir todas do mês</button>
   </div>
 
@@ -1261,6 +1262,7 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
     const ok = document.getElementById('sel-empresa').value && document.getElementById('sel-comp').value;
     document.getElementById('btn-nova-nota').disabled = !ok;
     document.getElementById('btn-excluir-mes').disabled = !ok;
+    document.getElementById('btn-cancelar-copias').disabled = !ok;
     document.getElementById('btn-importar-xml').disabled = !document.getElementById('sel-empresa').value;
   }
 
@@ -1322,6 +1324,22 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
       toast(d.excluidas + ' nota(s) excluída(s). Agora recapture no painel.', 'ok');
+      await buscar();
+    } catch(e) { toast('Erro: ' + e.message, 'err'); }
+  });
+  document.getElementById('btn-cancelar-copias').addEventListener('click', async function() {
+    const corpo = { empresa_id: Number(document.getElementById('sel-empresa').value), competencia: document.getElementById('sel-comp').value };
+    try {
+      const prev = await fetch('/v1/notas/cancelar-copias', { method: 'POST', headers: headers(), body: JSON.stringify(corpo) });
+      if (!prev.ok) throw new Error('HTTP ' + prev.status);
+      const p = await prev.json();
+      if (!p.copias) { toast('Nenhuma cópia duplicada neste mês.', 'ok'); return; }
+      const lista = p.notas.slice(0, 15).map(function(n) { return 'NF ' + n.numero + ' — R$ ' + fmt(n.valor_bruto); }).join('\n');
+      if (!confirm(p.copias + ' cópia(s) serão marcadas como canceladas (fica uma de cada nota):\n\n' + lista + (p.copias > 15 ? '\n…' : ''))) return;
+      const r = await fetch('/v1/notas/cancelar-copias', { method: 'POST', headers: headers(), body: JSON.stringify(Object.assign({ aplicar: true }, corpo)) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      toast(d.copias + ' cópia(s) cancelada(s).', 'ok');
       await buscar();
     } catch(e) { toast('Erro: ' + e.message, 'err'); }
   });

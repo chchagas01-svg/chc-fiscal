@@ -88,13 +88,32 @@ export async function localizarDuplicata(empresaId: number, chave: string): Prom
   const r = await query<{ empresa_id: number; competencia: string; cancelada: boolean }>(
     `SELECT empresa_id, competencia, cancelada FROM notas WHERE chave_acesso = $1`, [chave]);
   const row = r.rows[0];
-  if (!row) return 'não localizada';
+  // Sem a chave no banco: foi barrada por já existir a mesma NFS-e gravada com outra chave
+  if (!row) return 'mesma nota com outra chave';
   if (Number(row.empresa_id) !== empresaId) return 'outra empresa';
   return row.cancelada ? `${row.competencia} (cancelada)` : row.competencia;
 }
 
+// A mesma NFS-e pode chegar com chaves diferentes (ex.: layout municipal e nacional, ou XML
+// importado à mão e capturado do Qyon). Identifica a nota pelo emitente, número, data e valor.
+export async function existeMesmaNfse(empresaId: number, nota: ParsedNota): Promise<boolean> {
+  if (nota.tipoDoc !== 'nfse' || !nota.numero) return false;
+  const r = await query(
+    `SELECT 1 FROM notas
+      WHERE empresa_id = $1 AND tipo_doc = 'nfse' AND cancelada = false
+        AND chave_acesso <> $2
+        AND COALESCE(cnpj_emitente, '') = COALESCE($3, '')
+        AND NULLIF(LTRIM(numero, '0'), '') IS NOT DISTINCT FROM NULLIF(LTRIM($4, '0'), '')
+        AND data_emissao = $5::date AND valor_bruto = $6
+      LIMIT 1`,
+    [empresaId, nota.chaveAcesso, nota.cnpjEmitente ?? null, String(nota.numero), nota.dataEmissao, nota.valorBruto]
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
 // Retorna true se inserida, false se já existia (duplicata silenciosa)
 export async function inserirNota(empresaId: number, competencia: string, nota: ParsedNota): Promise<boolean> {
+  if (!nota.cancelada && await existeMesmaNfse(empresaId, nota)) return false;
   const result = await query(
     `INSERT INTO notas (
        empresa_id, chave_acesso, tipo_doc, numero, serie, data_emissao, competencia,

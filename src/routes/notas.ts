@@ -415,6 +415,32 @@ router.delete('/:id', async (req, res) => {
   return res.json({ ok: true, cancelada: true, id });
 });
 
+// POST /v1/notas/cancelar-copias — cancela as cópias da mesma NFS-e gravada com chaves diferentes
+// (mesmo emitente, número, data e valor). Fica a primeira importada, ou a que teve retenção ajustada à mão.
+// Body: { empresa_id, competencia, aplicar?: boolean } — sem aplicar=true apenas lista as cópias
+router.post('/cancelar-copias', async (req, res) => {
+  const empresaId = Number(req.body?.empresa_id);
+  const competencia = String(req.body?.competencia ?? '');
+  if (!empresaId || !/^\d{4}-\d{2}$/.test(competencia))
+    return res.status(400).json({ erro: 'empresa_id e competencia (YYYY-MM) são obrigatórios' });
+
+  const copias = `
+    SELECT id FROM (
+      SELECT id, ROW_NUMBER() OVER (
+               PARTITION BY natureza, COALESCE(cnpj_emitente, ''), NULLIF(LTRIM(numero, '0'), ''), data_emissao, valor_bruto
+               ORDER BY retencao_manual DESC, id) AS ordem
+        FROM notas
+       WHERE empresa_id = $1 AND competencia = $2 AND tipo_doc = 'nfse'
+         AND cancelada = false AND NULLIF(LTRIM(numero, '0'), '') IS NOT NULL
+    ) g WHERE ordem > 1`;
+  const r = req.body?.aplicar === true
+    ? await query(`UPDATE notas SET cancelada = true WHERE id IN (${copias})
+                   RETURNING id, numero, valor_bruto::float AS valor_bruto`, [empresaId, competencia])
+    : await query(`SELECT id, numero, valor_bruto::float AS valor_bruto FROM notas WHERE id IN (${copias}) ORDER BY id`,
+                  [empresaId, competencia]);
+  return res.json({ ok: true, aplicado: req.body?.aplicar === true, copias: r.rowCount ?? 0, notas: r.rows });
+});
+
 // DELETE /v1/notas?empresa_id=X&competencia=YYYY-MM — exclui todas as notas do mês (para recapturar)
 router.delete('/', async (req, res) => {
   const empresaId = Number(req.query['empresa_id']);
