@@ -38,9 +38,6 @@ export interface EntradaPresumido {
   // Retenções
   retencoes_mes: SaldoRetencoes;
   saldo_anterior: SaldoRetencoes;
-
-  // Empresas com receita anual > R$5M pagam adicional de IRPJ sobre a base inteira
-  irpj_adicional_sobre_base_total?: boolean;
 }
 
 export interface ResultadoPresumido {
@@ -179,15 +176,10 @@ export function calcularPresumido(entrada: EntradaPresumido): ResultadoOuTravaPr
 
     irpjBruto = r2(baseIrpjTrim * ALIQ_IRPJ);
 
-    if (entrada.irpj_adicional_sobre_base_total) {
-      // Receita anual > R$5M: adicional de 10% sobre a base integral (sem franquia de R$60k)
-      irpjAdicional = r2(baseIrpjTrim * ALIQ_IRPJ_ADICIONAL);
-      alertas.push(`Adicional de IRPJ: R$ ${irpjAdicional.toFixed(2)} — base integral (receita anual > R$ 5.000.000).`);
-    } else {
-      irpjAdicional = r2(Math.max(0, baseIrpjTrim - LIMITE_ADICIONAL_IRPJ) * ALIQ_IRPJ_ADICIONAL);
-      if (irpjAdicional > 0) {
-        alertas.push(`Adicional de IRPJ: R$ ${irpjAdicional.toFixed(2)} (base trimestral R$ ${baseIrpjTrim.toFixed(2)} > R$ 60.000).`);
-      }
+    // Adicional de 10% sobre a parcela da base que passa de R$ 60.000 no trimestre (Lei 9.430/96, art. 4º)
+    irpjAdicional = r2(Math.max(0, baseIrpjTrim - LIMITE_ADICIONAL_IRPJ) * ALIQ_IRPJ_ADICIONAL);
+    if (irpjAdicional > 0) {
+      alertas.push(`Adicional de IRPJ: R$ ${irpjAdicional.toFixed(2)} (base trimestral R$ ${baseIrpjTrim.toFixed(2)} > R$ 60.000).`);
     }
 
     const irpjTotal = r2(irpjBruto + irpjAdicional);

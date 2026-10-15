@@ -99,6 +99,9 @@ export interface SaldosAnteriores {
   retencoes: { pis: number; cofins: number; csll: number; irrf: number; inss?: number };
   // Bases de IRPJ dos meses anteriores do mesmo trimestre (para o adicional)
   base_irpj_trimestre_anterior: number;
+  base_csll_trimestre_anterior?: number;
+  // Meses do trimestre já apurados antes da competência ('YYYY-MM')
+  meses_trimestre_apurados?: string[];
   // Faturamento das notas de saída dos 12 meses anteriores à competência
   rbt12_historico?: number;
   // Presumido: faturamento de cada mês do ano antes da competência ('YYYY-MM' → R$)
@@ -426,12 +429,16 @@ export function montarResumo(
 
   const pisApurado = r2(faturamento * ALIQ_PIS);
   const cofinsApurado = r2(faturamento * ALIQ_COFINS);
-  const irpjApurado = r2(baseIrpj * ALIQ_IRPJ);
   // Adicional: 10% sobre o que a base do trimestre até agora passa de R$ 20 mil por mês decorrido
   const mesNoTrim = ((mes! - 1) % 3) + 1;
   const baseTrim = r2(saldos.base_irpj_trimestre_anterior + baseIrpj);
   const adicionalTrim = r2(Math.max(0, baseTrim - LIMITE_ADICIONAL_MES * mesNoTrim) * ALIQ_IRPJ_ADICIONAL);
-  const csllApurado = r2(baseCsll * ALIQ_CSLL);
+  // 3º mês: IRPJ e CSLL do trimestre inteiro (bases dos meses anteriores vêm das apurações)
+  const fechaTrimestre = mesNoTrim === 3;
+  const baseIrpjLinha = fechaTrimestre ? baseTrim : baseIrpj;
+  const baseCsllLinha = fechaTrimestre ? r2((saldos.base_csll_trimestre_anterior ?? 0) + baseCsll) : baseCsll;
+  const irpjApurado = r2(baseIrpjLinha * ALIQ_IRPJ);
+  const csllApurado = r2(baseCsllLinha * ALIQ_CSLL);
 
   const dPis = deduzir(pisApurado, retSofrida.pis);
   const dCofins = deduzir(cofinsApurado, retSofrida.cofins);
@@ -439,14 +446,25 @@ export function montarResumo(
   const dCsll = deduzir(csllApurado, retSofrida.csll);
 
   const trimestre = identificarTrimestre(competencia);
-  const obsTrim = `Prévia: IRPJ/CSLL vencem no fechamento do ${trimestre.split('-T')[1]}º trimestre.`;
+  const nTrim = trimestre.split('-T')[1];
+  const obsTrim = fechaTrimestre
+    ? `Fechamento do ${nTrim}º trimestre: base dos três meses.`
+    : `Prévia: IRPJ/CSLL vencem no fechamento do ${nTrim}º trimestre.`;
+  if (fechaTrimestre) {
+    const primeiro = 3 * Number(nTrim) - 2;
+    const faltando = [primeiro, primeiro + 1].map(m => `${ano}-${String(m).padStart(2, '0')}`)
+      .filter(c => !(saldos.meses_trimestre_apurados ?? []).includes(c));
+    if (faltando.length) {
+      alertas.push(`Fechamento do trimestre sem a apuração de ${faltando.map(c => c.split('-').reverse().join('/')).join(' e ')}: IRPJ/CSLL ficam só com a base deste mês. Capture e apure esses meses.`);
+    }
+  }
   const federais: LinhaTributo[] = [
     { tributo: 'PIS Faturamento', aliquota: ALIQ_PIS, base: faturamento, apurado: pisApurado, deducoes: dPis.deducao, a_recolher: dPis.a_recolher },
     { tributo: 'COFINS Faturamento', aliquota: ALIQ_COFINS, base: faturamento, apurado: cofinsApurado, deducoes: dCofins.deducao, a_recolher: dCofins.a_recolher },
-    { tributo: 'IRPJ Presumido', aliquota: ALIQ_IRPJ, base: baseIrpj, apurado: irpjApurado, deducoes: 0, a_recolher: 0, observacao: obsTrim },
+    { tributo: 'IRPJ Presumido', aliquota: ALIQ_IRPJ, base: baseIrpjLinha, apurado: irpjApurado, deducoes: 0, a_recolher: 0, observacao: obsTrim },
     { tributo: 'Adicional do IRPJ', aliquota: ALIQ_IRPJ_ADICIONAL, base: baseTrim, apurado: adicionalTrim, deducoes: 0, a_recolher: 0,
       observacao: `Base do trimestre até a data; isenção de R$ ${(LIMITE_ADICIONAL_MES * mesNoTrim).toLocaleString('pt-BR')}.` },
-    { tributo: 'CSLL Presumido', aliquota: ALIQ_CSLL, base: baseCsll, apurado: csllApurado, deducoes: dCsll.deducao, a_recolher: dCsll.a_recolher, observacao: obsTrim },
+    { tributo: 'CSLL Presumido', aliquota: ALIQ_CSLL, base: baseCsllLinha, apurado: csllApurado, deducoes: dCsll.deducao, a_recolher: dCsll.a_recolher, observacao: obsTrim },
   ];
   // Retenção de IR abate IRPJ + adicional juntos: distribui primeiro no IRPJ
   const dedIrpjNormal = r2(Math.min(irpjApurado, dIrpj.deducao));
@@ -565,7 +583,9 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
 
   const trimestre = identificarTrimestre(competencia);
   const trimRes = await query<Record<string, unknown>>(
-    `SELECT COALESCE(SUM(base_irpj), 0) AS base FROM apuracoes
+    `SELECT COALESCE(SUM(base_irpj), 0) AS base, COALESCE(SUM(base_csll), 0) AS base_csll,
+            COALESCE(ARRAY_AGG(competencia) FILTER (WHERE competencia IS NOT NULL), '{}') AS meses
+       FROM apuracoes
       WHERE empresa_id = $1 AND trimestre = $2 AND competencia < $3`,
     [empresaId, trimestre, competencia]
   );
@@ -589,6 +609,8 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
     icms_saldo_credor: Number(ant?.['icms_saldo_credor'] ?? 0),
     retencoes: { pis: Number(ret.pis ?? 0), cofins: Number(ret.cofins ?? 0), csll: Number(ret.csll ?? 0), irrf: Number(ret.irrf ?? 0), inss: Number(ret.inss ?? 0) },
     base_irpj_trimestre_anterior: Number(trimRes.rows[0]?.['base'] ?? 0),
+    base_csll_trimestre_anterior: Number(trimRes.rows[0]?.['base_csll'] ?? 0),
+    meses_trimestre_apurados: ((trimRes.rows[0]?.['meses'] ?? []) as string[]).map(String),
     rbt12_historico: await buscarRBT12(empresaId, competencia),
     faturamento_meses_ano: Object.fromEntries(anoRes.rows.map(r => [String(r['competencia']), Number(r['valor'])])),
     faturamento_informado: Object.fromEntries(infRes.rows.map(r => [String(r['competencia']), Number(r['valor'])])),
