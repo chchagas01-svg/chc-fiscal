@@ -232,7 +232,17 @@ table.horiz th:first-child, table.horiz td:first-child { text-align: right; font
         '</td><td>' + val(l.icms) + '</td><td class="txt">' + esc(l.canceladas.join(', ') || '-') + '</td><td>' + val(l.valor) + '</td></tr>';
     });
     h += '<tr class="total"><td>Total</td><td></td><td></td><td>' + val(s.total_icms) + '</td><td></td><td></td></tr>';
-    h += '<tr class="grand"><td colspan="5" style="text-align:right">Total faturamento</td><td>' + brl(s.total_faturamento) + '</td></tr></table></div>';
+    h += '<tr class="grand"><td colspan="5" style="text-align:right">Total faturamento</td><td>' + brl(s.total_faturamento) + '</td></tr>';
+    const ac = d.acumulado;
+    if (ac && ac.tipo === 'rbt12') {
+      const origem = { notas: 'notas dos 12 meses anteriores', cadastro: 'base informada no cadastro', provisorio: 'provisório: faturamento do mês × 12', sem_historico: 'sem histórico' }[ac.origem] || '';
+      h += '<tr><td colspan="5" style="text-align:right">Faturamento acumulado 12 meses (RBT12)<div class="obs">' + esc(origem) + '</div></td><td>' + val(ac.valor) + '</td></tr>';
+    }
+    h += '</table></div>';
+    if (ac && ac.tipo === 'ano') {
+      h += '<div class="tbl-wrap"><table class="horiz"><tr>' + ac.trimestres.map((t) => '<th>' + t.trimestre + 'º trim.' + (t.parcial ? ' (parcial)' : '') + '</th>').join('') +
+        '<th>Acumulado ' + ac.ano + '</th></tr><tr>' + ac.trimestres.map((t) => '<td>' + val(t.valor) + '</td>').join('') + '<td><strong>' + brl(ac.total) + '</strong></td></tr></table></div>';
+    }
     if (s.outras_saidas) h += '<div class="obs">Outras saídas sem receita (devolução, remessa, retorno): R$ ' + brl(s.outras_saidas) + '</div>';
 
     h += '<h2>Entradas</h2><div class="lado"><div class="tbl-wrap"><table><tr><th>Compras</th><th>ICMS</th><th>R$</th></tr>';
@@ -255,7 +265,9 @@ table.horiz th:first-child, table.horiz td:first-child { text-align: right; font
 
     if (t) {
       h += '<h2>Tributos</h2>';
-      h += quadroTributo('Federais', t.federais, 'Retenções', t.total_federais);
+      h += d.empresa.regime === 'simples'
+        ? quadroTributo('Simples Nacional', t.federais, 'Deduções', t.total_federais)
+        : quadroTributo('Federais', t.federais, 'Retenções', t.total_federais);
       const qEst = quadroTributo('Estaduais', t.estaduais, 'Crédito', t.total_estaduais);
       const qMun = quadroTributo('Municipais', t.municipais, 'Retenções', t.total_municipais);
       h += qEst && qMun ? '<div class="lado"><div>' + qEst + '</div><div>' + qMun + '</div></div>' : qEst + qMun;
