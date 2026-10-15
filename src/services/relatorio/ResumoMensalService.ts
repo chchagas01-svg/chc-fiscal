@@ -9,11 +9,17 @@
 // - ICMS só para empresa com Inscrição Estadual que não é do Simples.
 // - IRPJ/CSLL do Presumido são trimestrais: o valor do mês é prévia; o adicional considera
 //   a base acumulada do trimestre até a data.
+// - Simples: DAS pelo mesmo cálculo da Apuração (calcularSimples), com a receita até a data.
+// - Acumulado: Simples mostra o RBT12 (12 meses anteriores); Presumido, o faturamento do ano
+//   e de cada trimestre até a data.
 import { query } from '../../config/database';
 import { parseXml } from '../parsers';
 import { classificarEntrada, cfopDeEntrada, classificarSaida, FinalidadeEntrada } from '../engine/cfop';
 import { identificarTrimestre } from '../engine/lucroPresumido';
 import { calcularDifalItem } from '../engine/difal';
+import { buscarRBT12, resolverRbt12 } from '../engine/ApuracaoService';
+import { calcularSimples } from '../engine/simplesNacional';
+import { AnexoSimples } from '../engine/tabelasSimples';
 
 const ALIQ_PIS = 0.0065;
 const ALIQ_COFINS = 0.03;
@@ -39,6 +45,10 @@ export interface EmpresaResumo {
   presuncao_industria: number | null;
   presuncao_irpj: number | null;
   presuncao_csll: number | null;
+  anexo?: AnexoSimples | null;
+  anexo_comercio?: AnexoSimples | null;
+  rbt12_seed?: number | null;
+  folha_12meses_seed?: number | null;
   aliquota_iss: number | null;
   uf: string | null;
   aliquota_icms_interna: number | null;
@@ -86,9 +96,13 @@ export interface NotaDifal {
 export interface SaldosAnteriores {
   icms_saldo_credor: number;
   // Retenções sofridas que sobraram de meses anteriores
-  retencoes: { pis: number; cofins: number; csll: number; irrf: number };
+  retencoes: { pis: number; cofins: number; csll: number; irrf: number; inss?: number };
   // Bases de IRPJ dos meses anteriores do mesmo trimestre (para o adicional)
   base_irpj_trimestre_anterior: number;
+  // Faturamento das notas de saída dos 12 meses anteriores à competência
+  rbt12_historico?: number;
+  // Presumido: faturamento de cada mês do ano antes da competência ('YYYY-MM' → R$)
+  faturamento_meses_ano?: Record<string, number>;
 }
 
 // ── Formato do relatório ───────────────────────────────────────────────────────
@@ -140,6 +154,11 @@ export interface ResumoMensal {
     total_devido: number;
   } | null;
   retencoes_a_recolher: { irrf: number; csrf: number; inss: number; issqn: number; total: number };
+  // Simples: RBT12 (12 meses anteriores, pelas notas ou base do cadastro).
+  // Presumido: faturamento do ano e de cada trimestre até a data (inclui o mês do resumo).
+  acumulado:
+    | { tipo: 'rbt12'; valor: number; origem: 'notas' | 'cadastro' | 'provisorio' | 'sem_historico' }
+    | { tipo: 'ano'; ano: number; total: number; trimestres: { trimestre: number; valor: number; parcial: boolean }[] };
   valores_a_compensar: { pis: number; cofins: number; irpj: number; csll: number; icms: number; issqn: number };
   alertas: string[];
 }
@@ -296,6 +315,26 @@ export function montarResumo(
   const retencoesARecolher = { irrf: tom.irrf, csrf: tom.csrf, inss: tom.inss, issqn: tom.issqn,
     total: r2(tom.irrf + tom.csrf + tom.inss + tom.issqn) };
 
+  const historico = saldos.rbt12_historico ?? 0;
+  const rb = resolverRbt12(historico, empresa.rbt12_seed ?? null, faturamento, notas.length > 0);
+  const rbOrigem = historico > 0 ? 'notas' as const : (empresa.rbt12_seed ?? 0) > 0 ? 'cadastro' as const
+    : rb.rbt12 > 0 ? 'provisorio' as const : 'sem_historico' as const;
+
+  let acumulado: ResumoMensal['acumulado'];
+  if (empresa.regime === 'simples') {
+    acumulado = { tipo: 'rbt12', valor: r2(rb.rbt12), origem: rbOrigem };
+  } else {
+    const meses = { ...(saldos.faturamento_meses_ano ?? {}), [competencia]: faturamento };
+    const trimAtual = Math.ceil(mes! / 3);
+    const trimestres = [];
+    for (let t = 1; t <= trimAtual; t++) {
+      let v = 0;
+      for (let m = 3 * t - 2; m <= 3 * t; m++) v += meses[`${ano}-${String(m).padStart(2, '0')}`] ?? 0;
+      trimestres.push({ trimestre: t, valor: r2(v), parcial: t === trimAtual && !(mes! % 3 === 0 && apuradoAte >= ultimoDia) });
+    }
+    acumulado = { tipo: 'ano', ano: ano!, total: r2(trimestres.reduce((s, t) => s + t.valor, 0)), trimestres };
+  }
+
   if (faturamento === 0 && compras.length === 0 && tomados.length === 0) {
     alertas.push('Sem movimento capturado até a data.');
   }
@@ -312,17 +351,54 @@ export function montarResumo(
       total_compras: r2(linhasCompra.reduce((s, l) => s + l.valor, 0)), servicos_tomados: tom,
       difal: { aplicavel: difalAplicavel, total: difalTotal, notas: notasDifal } },
     retencoes_a_recolher: retencoesARecolher,
+    acumulado,
   };
 
   if (empresa.regime === 'simples') {
-    alertas.push('Simples Nacional: tributos apurados pelo DAS (módulo de apuração), não por este quadro.');
-    const valoresZerados = { pis: 0, cofins: 0, irpj: 0, csll: 0, icms: 0, issqn: 0 };
-    if (!difalAplicavel) return { ...resumoBase, tributos: null, valores_a_compensar: valoresZerados, alertas };
-    // Simples com IE: o ICMS fora do DAS (Difal) sai neste quadro e vai para a DeSTDA
+    alertas.push(...rb.alertas);
+    const prestAtivos = prestados.filter(n => !n.cancelada);
+    const soma = (f: (n: NotaResumo) => number) => r2(prestAtivos.reduce((s, n) => s + f(n), 0));
+    const receitaMercadorias = r2(receitaComercio + receitaIndustria);
+    const folha = Number(empresa.folha_12meses_seed ?? 0);
+    const calc = calcularSimples({
+      receita_bruta_mes: faturamento,
+      receita_servicos_mes: receitaServicos,
+      receita_comercio_mes: receitaMercadorias,
+      rbt12: rb.rbt12,
+      folha_12meses: folha,
+      anexo: (empresa.anexo ?? 'III') as AnexoSimples,
+      ...(empresa.anexo_comercio ? { anexo_comercio: empresa.anexo_comercio } : {}),
+      // Só as retenções sofridas nos serviços prestados abatem o DAS
+      retencoes_mes: { pis: soma(n => n.ret_pis), cofins: soma(n => n.ret_cofins), csll: soma(n => n.ret_csll),
+        irrf: soma(n => n.ret_irrf), inss: soma(n => n.ret_inss) },
+      saldo_anterior: { pis: saldos.retencoes.pis, cofins: saldos.retencoes.cofins, csll: saldos.retencoes.csll,
+        irrf: saldos.retencoes.irrf, inss: saldos.retencoes.inss ?? 0 },
+      iss_retido_tomador: soma(n => (n.iss_retido ? n.valor_iss : 0)),
+    });
+    const federais: LinhaTributo[] = [];
+    let compensar = { pis: 0, cofins: 0, irpj: 0, csll: 0, icms: 0, issqn: 0 };
+    if (!calc.ok) {
+      alertas.push(`Simples Nacional: DAS não calculado. ${calc.trava.mensagem}`);
+    } else {
+      const c = calc.resultado;
+      alertas.push(...c.alertas);
+      const misto = c.das_servicos != null && c.das_comercio != null;
+      const obs = misto
+        ? `Serviços: Anexo ${c.anexo_aplicado} ${(c.aliquota_efetiva * 100).toFixed(2)}% · Mercadorias: Anexo ${empresa.anexo_comercio} ${((c.aliquota_efetiva_comercio ?? 0) * 100).toFixed(2)}%`
+        : `Anexo ${c.anexo_aplicado}, faixa ${c.faixa}${folha > 0 ? `, Fator R ${(c.fator_r * 100).toFixed(2)}%` : ''}.`;
+      federais.push({ tributo: 'Simples Nacional (DAS)', aliquota: misto ? null : c.aliquota_efetiva, base: faturamento,
+        apurado: c.das_bruto, deducoes: c.das_deducoes, a_recolher: c.das_devido, observacao: obs });
+      compensar = { ...compensar, pis: c.saldo_proximo.pis, cofins: c.saldo_proximo.cofins, irpj: c.saldo_proximo.irrf, csll: c.saldo_proximo.csll };
+    }
+    // Simples com IE e Difal: o ICMS fora do DAS (Difal) sai no quadro estadual e vai para a DeSTDA
+    const estaduais = difalAplicavel ? [linhaDifal] : [];
+    const totalFederais = r2(federais.reduce((s, l) => s + l.a_recolher, 0));
+    const totalEstaduais = difalAplicavel ? difalTotal : 0;
     return { ...resumoBase, tributos: {
-      federais: [], estaduais: [linhaDifal], municipais: [],
-      total_federais: 0, total_estaduais: difalTotal, total_municipais: 0, total_devido: difalTotal,
-    }, valores_a_compensar: valoresZerados, alertas };
+      federais, estaduais, municipais: [],
+      total_federais: totalFederais, total_estaduais: totalEstaduais, total_municipais: 0,
+      total_devido: r2(totalFederais + totalEstaduais),
+    }, valores_a_compensar: compensar, alertas };
   }
 
   // ── Tributos federais (Lucro Presumido cumulativo) ──
@@ -425,7 +501,8 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
             presuncao_servicos::float AS presuncao_servicos, presuncao_comercio::float AS presuncao_comercio,
             presuncao_industria::float AS presuncao_industria, presuncao_irpj::float AS presuncao_irpj,
             presuncao_csll::float AS presuncao_csll, aliquota_iss::float AS aliquota_iss,
-            uf, aliquota_icms_interna::float AS aliquota_icms_interna
+            uf, aliquota_icms_interna::float AS aliquota_icms_interna,
+            anexo, anexo_comercio, rbt12_seed::float AS rbt12_seed, folha_12meses_seed::float AS folha_12meses_seed
        FROM empresas WHERE id = $1`,
     [empresaId]
   );
@@ -486,10 +563,21 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
     [empresaId, trimestre, competencia]
   );
 
+  // Faturamento dos meses do ano antes da competência (acumulado do Presumido)
+  const anoRes = await query<Record<string, unknown>>(
+    `SELECT competencia, COALESCE(SUM(valor_bruto), 0) AS valor FROM notas
+      WHERE empresa_id = $1 AND competencia >= $2 AND competencia < $3
+        AND NOT cancelada AND natureza IN ('servico_prestado', 'venda')
+      GROUP BY competencia`,
+    [empresaId, `${anoC}-01`, competencia]
+  );
+
   return montarResumo(empresa, competencia, apuradoAte, notas, {
     icms_saldo_credor: Number(ant?.['icms_saldo_credor'] ?? 0),
-    retencoes: { pis: Number(ret.pis ?? 0), cofins: Number(ret.cofins ?? 0), csll: Number(ret.csll ?? 0), irrf: Number(ret.irrf ?? 0) },
+    retencoes: { pis: Number(ret.pis ?? 0), cofins: Number(ret.cofins ?? 0), csll: Number(ret.csll ?? 0), irrf: Number(ret.irrf ?? 0), inss: Number(ret.inss ?? 0) },
     base_irpj_trimestre_anterior: Number(trimRes.rows[0]?.['base'] ?? 0),
+    rbt12_historico: await buscarRBT12(empresaId, competencia),
+    faturamento_meses_ano: Object.fromEntries(anoRes.rows.map(r => [String(r['competencia']), Number(r['valor'])])),
   });
 }
 

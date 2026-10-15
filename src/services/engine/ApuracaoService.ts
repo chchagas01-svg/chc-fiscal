@@ -110,7 +110,7 @@ async function buscarTotaisNotas(empresaId: number, competencia: string): Promis
   };
 }
 
-async function buscarRBT12(empresaId: number, competencia: string): Promise<number> {
+export async function buscarRBT12(empresaId: number, competencia: string): Promise<number> {
   // Soma apenas notas de saída (receita) dos 12 meses anteriores à competência
   const r = await query(
     `SELECT COALESCE(SUM(valor_bruto), 0) AS rbt12
@@ -123,6 +123,23 @@ async function buscarRBT12(empresaId: number, competencia: string): Promise<numb
     [empresaId, competencia]
   );
   return Number(r.rows[0]?.['rbt12'] ?? 0);
+}
+
+// RBT12 do Simples: soma das notas dos 12 meses anteriores; sem histórico, a base informada
+// no cadastro; sem nada, receita do mês × 12 como base provisória
+export function resolverRbt12(historico: number, seed: number | null, receitaMes: number, temNotas: boolean): { rbt12: number; alertas: string[] } {
+  const alertas: string[] = [];
+  if (historico > 0) return { rbt12: historico, alertas };
+  if (seed != null && Number(seed) > 0) {
+    alertas.push(`RBT12: base histórica informada R$ ${Number(seed).toFixed(2)}. A partir do próximo mês acumula automaticamente pelas notas.`);
+    return { rbt12: Number(seed), alertas };
+  }
+  if (receitaMes > 0) {
+    alertas.push('RBT12 histórico zero — usando receita do mês × 12 como base provisória. Importe os meses anteriores para resultado exato.');
+    return { rbt12: receitaMes * 12, alertas };
+  }
+  if (temNotas) alertas.push('RBT12 calculado como zero — pode faltar histórico de meses anteriores. Verifique o cadastro.');
+  return { rbt12: 0, alertas };
 }
 
 async function buscarSaldoAnterior(empresaId: number, competencia: string): Promise<SaldoAnteriorRow> {
@@ -276,19 +293,12 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
   const alertas: string[] = [];
 
   if (empresa.regime === 'simples') {
-    let rbt12 = await buscarRBT12(empresaId, competencia);
-    const receitaMes = totais.receita_servicos + totais.receita_comercio;
-
-    if (rbt12 === 0 && empresa.rbt12_seed != null && empresa.rbt12_seed > 0) {
-      // Primeiro mês sem histórico de notas: usa o seed fornecido diretamente como RBT12
-      rbt12 = Number(empresa.rbt12_seed);
-      alertas.push(`RBT12: base histórica informada R$ ${Number(empresa.rbt12_seed).toFixed(2)}. A partir do próximo mês acumula automaticamente pelas notas.`);
-    } else if (rbt12 === 0 && receitaMes > 0) {
-      rbt12 = receitaMes * 12;
-      alertas.push('RBT12 histórico zero — usando receita do mês × 12 como base provisória. Importe os meses anteriores para resultado exato.');
-    } else if (rbt12 === 0 && totais.total_notas > 0) {
-      alertas.push('RBT12 calculado como zero — pode faltar histórico de meses anteriores. Verifique o cadastro.');
-    }
+    // Indústria (Anexo II) entra junto com o comércio na receita do Simples
+    const receitaMercadorias = totais.receita_comercio + totais.receita_industria;
+    const receitaMes = totais.receita_servicos + receitaMercadorias;
+    const rb = resolverRbt12(await buscarRBT12(empresaId, competencia), empresa.rbt12_seed, receitaMes, totais.total_notas > 0);
+    const rbt12 = rb.rbt12;
+    alertas.push(...rb.alertas);
 
     const folha12meses = empresa.folha_12meses_seed != null ? Number(empresa.folha_12meses_seed) : 0;
     if (folha12meses === 0 && (empresa.anexo === 'III' || empresa.anexo === 'V')) {
@@ -298,7 +308,7 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
     const entrada = {
       receita_bruta_mes: receitaMes,
       receita_servicos_mes: totais.receita_servicos,
-      receita_comercio_mes: totais.receita_comercio,
+      receita_comercio_mes: receitaMercadorias,
       rbt12,
       folha_12meses: folha12meses,
       anexo: (empresa.anexo ?? 'III') as AnexoSimples,
@@ -328,7 +338,7 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
         receita_servicos: totais.receita_servicos,
         receita_comercio: totais.receita_comercio,
         receita_industria: totais.receita_industria,
-        receita_total: totais.receita_servicos + totais.receita_comercio,
+        receita_total: receitaMes,
         rbt12: resultado.resultado.rbt12,
         folha_12meses: folha12meses,
         fator_r: resultado.resultado.fator_r,
