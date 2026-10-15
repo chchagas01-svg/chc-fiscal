@@ -73,6 +73,7 @@ export interface NotaResumo {
   cancelada: boolean;
   id?: number;
   nome_emitente?: string | null;
+  cnpj_emitente?: string | null;
   // Finalidade da compra definida no painel (vale para a nota inteira); NULL = pelo CFOP
   finalidade_entrada?: FinalidadeEntrada | null;
   uf_emitente?: string;
@@ -345,6 +346,21 @@ export function montarResumo(
       meses_informados: Object.keys(informado).sort() };
   }
 
+  // Duplicidade: a chave de acesso já é única no banco, mas a mesma nota pode entrar com
+  // chaves diferentes (ex.: XML enviado à mão e capturado pelo Qyon). Mesmo número, série,
+  // emitente e valor = provável duplicata.
+  const grupos = new Map<string, NotaResumo[]>();
+  for (const n of notas) {
+    if (n.cancelada || !n.numero) continue;
+    const k = [n.natureza, n.tipo_doc, numeroInt(n.numero), n.serie ?? '', n.cnpj_emitente ?? n.nome_emitente ?? '', n.valor_bruto.toFixed(2)].join('|');
+    grupos.set(k, [...(grupos.get(k) ?? []), n]);
+  }
+  const duplicadas = [...grupos.values()].filter(g => g.length > 1);
+  if (duplicadas.length) {
+    alertas.push(`Possível nota em duplicidade (mesmo número, emitente e valor com chaves diferentes): ${duplicadas.slice(0, 10)
+      .map(g => `NF ${g[0]!.numero} de ${g[0]!.nome_emitente ?? 'emitente'} R$ ${g[0]!.valor_bruto.toFixed(2)} (${g.length}x)`).join('; ')}${duplicadas.length > 10 ? '…' : ''}. Marque a cópia como cancelada no painel de notas.`);
+  }
+
   if (faturamento === 0 && compras.length === 0 && tomados.length === 0) {
     alertas.push('Sem movimento capturado até a data.');
   }
@@ -541,7 +557,7 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
   const apuradoAte = ate ?? (hoje < ultimoDiaComp ? hoje : ultimoDiaComp);
 
   const notasRes = await query<Record<string, unknown>>(
-    `SELECT id, nome_emitente, finalidade_entrada, tipo_doc, numero, serie, natureza, cfop, valor_bruto, iss_retido, valor_iss,
+    `SELECT id, nome_emitente, cnpj_emitente, finalidade_entrada, tipo_doc, numero, serie, natureza, cfop, valor_bruto, iss_retido, valor_iss,
             ret_pis, ret_cofins, ret_csll, ret_irrf, ret_inss, icms_debito, icms_credito, cancelada,
             CASE WHEN natureza = 'compra' AND tipo_doc IN ('nfe','nfce') THEN xml_raw END AS xml_raw
        FROM notas
@@ -560,6 +576,7 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
       icms_debito: Number(row['icms_debito'] ?? 0), icms_credito: Number(row['icms_credito'] ?? 0),
       cancelada: Boolean(row['cancelada']),
       id: Number(row['id']), nome_emitente: row['nome_emitente'] as string | null,
+      cnpj_emitente: row['cnpj_emitente'] as string | null,
       finalidade_entrada: (row['finalidade_entrada'] as FinalidadeEntrada | null) ?? null,
     };
     if (row['xml_raw']) {
