@@ -479,10 +479,20 @@ body {
       const err = d.resumo?.com_erro ?? 0;
       const msg = `Captura concluída: ${n} nota(s) importada(s)${err ? `, ${err} com erro` : ''}`;
       addLog(msg, err ? 'err' : 'ok'); toast(msg, err ? 'err' : 'ok');
+      logDuplicatas(d);
       await loadStatus();
     } catch(e) {
       addLog(`Erro na captura: ${e.message}`, 'err'); toast('Erro na captura', 'err');
     } finally { setBtn('btn-capturar', false); }
+  }
+
+  // Notas que já existiam no banco: mostra em que competência estão gravadas
+  function logDuplicatas(d) {
+    (d.empresas || []).forEach(e => {
+      if (!e.duplicatas_ignoradas) return;
+      const onde = Object.entries(e.duplicatas_onde || {}).map(([k, n]) => `${k}: ${n}`).join(', ');
+      addLog(`${e.nome}: ${e.duplicatas_ignoradas} nota(s) já estavam gravadas${onde ? ` (${onde})` : ''}`, 'info');
+    });
   }
 
   async function apurar() {
@@ -538,6 +548,7 @@ body {
         const n = d.resumo?.total_notas_importadas ?? 0;
         const msg = `Captura ${nome}: ${n} nota(s) importada(s)`;
         addLog(msg, 'ok'); toast(msg, 'ok');
+        logDuplicatas(d);
       } else {
         const lib = await fetch('/v1/fechamento/liberar', {
           method: 'POST', headers: headers(),

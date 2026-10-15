@@ -47,6 +47,7 @@ router.post('/importar', async (req: Request, res: Response) => {
         status: r.status,
         notas_importadas: r.notas_importadas,
         duplicatas_ignoradas: r.notas_ignoradas_duplicatas,
+        duplicatas_onde: r.notas_ignoradas_duplicatas > 0 ? r.duplicatas_onde : undefined,
         erros: r.erros.length > 0 ? r.erros : undefined,
       })),
       resumos_mensais: resumos,
