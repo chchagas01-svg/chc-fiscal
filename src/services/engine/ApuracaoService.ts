@@ -373,12 +373,6 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
     }
     const icmsSaldoAnterior = temIcms ? Number(saldoAnt.icms_saldo_credor ?? 0) : 0;
 
-    // Receita anual (12 meses anteriores + mês atual) para verificar limite do adicional IRPJ
-    const rbt12Lp = await buscarRBT12(empresaId, competencia);
-    const receitaAtualLp = totais.receita_servicos + totais.receita_comercio + totais.receita_industria;
-    const receitaAnualLp = rbt12Lp + receitaAtualLp;
-    const irpjAdicionalIntegral = receitaAnualLp > 5_000_000;
-
     const entrada = {
       receita_servicos:    totais.receita_servicos,
       receita_comercio:    totais.receita_comercio,
@@ -397,7 +391,6 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
       icms_creditos_mes:   temIcms ? totais.icms_credito : 0,
       retencoes_mes:       retencoesMes,
       saldo_anterior:      saldoAnt.saldo_ret_proximo,
-      irpj_adicional_sobre_base_total: irpjAdicionalIntegral,
     };
 
     const resultado = calcularPresumido(entrada);
