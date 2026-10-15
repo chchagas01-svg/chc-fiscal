@@ -7,7 +7,7 @@ COMMENT ON COLUMN empresas.rbt12_seed     IS 'Receita acumulada 12 meses informa
 COMMENT ON COLUMN empresas.anexo_comercio IS 'Segundo anexo para empresa mista (ex: I = comércio, quando a empresa presta serviços E vende mercadorias). Nulo = atividade única.';
 
 -- Fernanda Mello: acumulado até 31/08/2026
-UPDATE empresas SET rbt12_seed = 352698.64
+UPDATE empresas SET rbt12_seed = 352689.64
   WHERE cnpj = '65996987000191';
 
 -- L. de Santana: acumulado até 31/08/2026 + atividade mista (Anexo III serviços + Anexo I comércio)
