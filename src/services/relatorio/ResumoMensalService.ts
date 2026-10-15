@@ -103,6 +103,8 @@ export interface SaldosAnteriores {
   rbt12_historico?: number;
   // Presumido: faturamento de cada mês do ano antes da competência ('YYYY-MM' → R$)
   faturamento_meses_ano?: Record<string, number>;
+  // Faturamento informado pelo escritório (declaração); vale no lugar das notas nesses meses
+  faturamento_informado?: Record<string, number>;
 }
 
 // ── Formato do relatório ───────────────────────────────────────────────────────
@@ -158,7 +160,8 @@ export interface ResumoMensal {
   // Presumido: faturamento do ano e de cada trimestre até a data (inclui o mês do resumo).
   acumulado:
     | { tipo: 'rbt12'; valor: number; origem: 'notas' | 'cadastro' | 'provisorio' | 'sem_historico' }
-    | { tipo: 'ano'; ano: number; total: number; trimestres: { trimestre: number; valor: number; parcial: boolean }[] };
+    | { tipo: 'ano'; ano: number; total: number; trimestres: { trimestre: number; valor: number; parcial: boolean }[];
+        meses_informados: string[] };
   valores_a_compensar: { pis: number; cofins: number; irpj: number; csll: number; icms: number; issqn: number };
   alertas: string[];
 }
@@ -324,7 +327,10 @@ export function montarResumo(
   if (empresa.regime === 'simples') {
     acumulado = { tipo: 'rbt12', valor: r2(rb.rbt12), origem: rbOrigem };
   } else {
-    const meses = { ...(saldos.faturamento_meses_ano ?? {}), [competencia]: faturamento };
+    // Meses anteriores: informado pelo escritório quando houver, senão a soma das notas
+    const informado = Object.fromEntries(Object.entries(saldos.faturamento_informado ?? {})
+      .filter(([c]) => c.startsWith(`${ano}-`) && c < competencia));
+    const meses = { ...(saldos.faturamento_meses_ano ?? {}), ...informado, [competencia]: faturamento };
     const trimAtual = Math.ceil(mes! / 3);
     const trimestres = [];
     for (let t = 1; t <= trimAtual; t++) {
@@ -332,7 +338,8 @@ export function montarResumo(
       for (let m = 3 * t - 2; m <= 3 * t; m++) v += meses[`${ano}-${String(m).padStart(2, '0')}`] ?? 0;
       trimestres.push({ trimestre: t, valor: r2(v), parcial: t === trimAtual && !(mes! % 3 === 0 && apuradoAte >= ultimoDia) });
     }
-    acumulado = { tipo: 'ano', ano: ano!, total: r2(trimestres.reduce((s, t) => s + t.valor, 0)), trimestres };
+    acumulado = { tipo: 'ano', ano: ano!, total: r2(trimestres.reduce((s, t) => s + t.valor, 0)), trimestres,
+      meses_informados: Object.keys(informado).sort() };
   }
 
   if (faturamento === 0 && compras.length === 0 && tomados.length === 0) {
@@ -572,12 +579,19 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
     [empresaId, `${anoC}-01`, competencia]
   );
 
+  const infRes = await query<Record<string, unknown>>(
+    `SELECT competencia, valor FROM faturamento_informado
+      WHERE empresa_id = $1 AND competencia >= $2 AND competencia < $3`,
+    [empresaId, `${anoC}-01`, competencia]
+  );
+
   return montarResumo(empresa, competencia, apuradoAte, notas, {
     icms_saldo_credor: Number(ant?.['icms_saldo_credor'] ?? 0),
     retencoes: { pis: Number(ret.pis ?? 0), cofins: Number(ret.cofins ?? 0), csll: Number(ret.csll ?? 0), irrf: Number(ret.irrf ?? 0), inss: Number(ret.inss ?? 0) },
     base_irpj_trimestre_anterior: Number(trimRes.rows[0]?.['base'] ?? 0),
     rbt12_historico: await buscarRBT12(empresaId, competencia),
     faturamento_meses_ano: Object.fromEntries(anoRes.rows.map(r => [String(r['competencia']), Number(r['valor'])])),
+    faturamento_informado: Object.fromEntries(infRes.rows.map(r => [String(r['competencia']), Number(r['valor'])])),
   });
 }
 

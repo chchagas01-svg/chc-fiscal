@@ -242,6 +242,11 @@ table.horiz th:first-child, table.horiz td:first-child { text-align: right; font
     if (ac && ac.tipo === 'ano') {
       h += '<div class="tbl-wrap"><table class="horiz"><tr>' + ac.trimestres.map((t) => '<th>' + t.trimestre + 'º trim.' + (t.parcial ? ' (parcial)' : '') + '</th>').join('') +
         '<th>Acumulado ' + ac.ano + '</th></tr><tr>' + ac.trimestres.map((t) => '<td>' + val(t.valor) + '</td>').join('') + '<td><strong>' + brl(ac.total) + '</strong></td></tr></table></div>';
+      if (ac.meses_informados && ac.meses_informados.length) {
+        const fm = (c) => c.split('-').reverse().join('/');
+        const mi = ac.meses_informados;
+        h += '<div class="obs">Meses ' + (mi.length > 1 ? fm(mi[0]) + ' a ' + fm(mi[mi.length - 1]) : fm(mi[0])) + ' pelo faturamento informado (declaração); demais pelas notas.</div>';
+      }
     }
     if (s.outras_saidas) h += '<div class="obs">Outras saídas sem receita (devolução, remessa, retorno): R$ ' + brl(s.outras_saidas) + '</div>';
 
