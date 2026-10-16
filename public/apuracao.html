@@ -431,7 +431,8 @@ header a.back:hover { background: var(--surface-2); }
   // ── Formatters ─────────────────────────────────────
   function fmt(n) { return parseFloat(n||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function fmtR(n) { return 'R$ ' + fmt(n); }
-  function pct(n) { return parseFloat(n||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + '%'; }
+  // Alíquotas e presunções vêm gravadas como fração (0,08 = 8%)
+  function pct(n) { return (parseFloat(n||0) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + '%'; }
   function fmtData(s) { if (!s) return '—'; const d = new Date(s); return d.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric', timeZone:'UTC' }); }
   function fmtCnpj(c) { c = (c||'').replace(/\D/g,''); return c.length === 14 ? c.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,'$1.$2.$3/$4-$5') : c; }
 })();
