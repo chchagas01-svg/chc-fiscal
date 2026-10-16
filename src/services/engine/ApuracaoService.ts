@@ -166,6 +166,34 @@ async function buscarSaldoAnterior(empresaId: number, competencia: string): Prom
   };
 }
 
+// Meses anteriores do trimestre cuja apuração gravada não bate mais com as notas
+// (ex.: notas duplicadas canceladas depois de apurar). O fechamento usa a base gravada,
+// então esses meses precisam ser apurados de novo antes.
+export async function mesesTrimestreDesatualizados(
+  empresaId: number, competencia: string, trimestre: string
+): Promise<{ competencia: string; apurado: number; notas: number }[]> {
+  const r = await query<{ competencia: string; receita_total: string }>(
+    `SELECT competencia, receita_total FROM apuracoes
+      WHERE empresa_id = $1 AND trimestre = $2 AND competencia < $3 ORDER BY competencia`,
+    [empresaId, trimestre, competencia]
+  );
+  const out: { competencia: string; apurado: number; notas: number }[] = [];
+  for (const row of r.rows) {
+    const t = await buscarTotaisNotas(empresaId, row.competencia);
+    const notas = Math.round((t.receita_servicos + t.receita_comercio + t.receita_industria) * 100) / 100;
+    const apurado = Number(row.receita_total ?? 0);
+    if (Math.abs(notas - apurado) >= 0.01) out.push({ competencia: row.competencia, apurado, notas });
+  }
+  return out;
+}
+
+export function mensagemTrimestreDesatualizado(meses: { competencia: string; apurado: number; notas: number }[]): string {
+  const brl = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `Apuração desatualizada em ${meses.map(m =>
+    `${m.competencia.split('-').reverse().join('/')} (apurado R$ ${brl(m.apurado)}, notas hoje R$ ${brl(m.notas)})`).join('; ')}. ` +
+    `Apure esses meses de novo antes de fechar o trimestre.`;
+}
+
 async function buscarBaseAcumuladaTrimestre(empresaId: number, competencia: string, trimestre: string): Promise<{ base_irpj: number; base_csll: number }> {
   const r = await query(
     `SELECT COALESCE(SUM(base_irpj), 0) AS base_irpj, COALESCE(SUM(base_csll), 0) AS base_csll
@@ -365,6 +393,7 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
     const mesTrim = mesDotrimestre(competencia);
     const { base_irpj: baseAcumIrpj, base_csll: baseAcumCsll } =
       await buscarBaseAcumuladaTrimestre(empresaId, competencia, trimestre);
+    const desatualizados = mesTrim === 3 ? await mesesTrimestreDesatualizados(empresaId, competencia, trimestre) : [];
 
     // Regra do escritório: só apura ICMS quem tem Inscrição Estadual (e não é do Simples)
     const temIcms = Boolean(empresa.inscricao_estadual?.trim());
@@ -425,6 +454,17 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
         memoria_calculo: memoriaCalculo,
         status: 'rascunho',
       });
+
+      if (desatualizados.length) {
+        const aviso = mensagemTrimestreDesatualizado(desatualizados);
+        alertas.push(`TRAVA: ${aviso}`);
+        status = 'retida';
+        motivo = aviso;
+        await query(
+          `UPDATE apuracoes SET status='retida', motivo_retencao=$1 WHERE empresa_id=$2 AND competencia=$3`,
+          [aviso, empresaId, competencia]
+        );
+      }
     }
   }
 

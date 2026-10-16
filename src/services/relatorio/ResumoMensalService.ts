@@ -17,7 +17,7 @@ import { parseXml } from '../parsers';
 import { classificarEntrada, cfopDeEntrada, classificarSaida, FinalidadeEntrada } from '../engine/cfop';
 import { identificarTrimestre } from '../engine/lucroPresumido';
 import { calcularDifalItem } from '../engine/difal';
-import { buscarRBT12, resolverRbt12 } from '../engine/ApuracaoService';
+import { buscarRBT12, resolverRbt12, mesesTrimestreDesatualizados, mensagemTrimestreDesatualizado } from '../engine/ApuracaoService';
 import { calcularSimples } from '../engine/simplesNacional';
 import { AnexoSimples } from '../engine/tabelasSimples';
 
@@ -103,6 +103,8 @@ export interface SaldosAnteriores {
   base_csll_trimestre_anterior?: number;
   // Meses do trimestre já apurados antes da competência ('YYYY-MM')
   meses_trimestre_apurados?: string[];
+  // Meses anteriores do trimestre cuja apuração gravada não bate com as notas atuais
+  trimestre_desatualizado?: { competencia: string; apurado: number; notas: number }[];
   // Faturamento das notas de saída dos 12 meses anteriores à competência
   rbt12_historico?: number;
   // Presumido: faturamento de cada mês do ano antes da competência ('YYYY-MM' → R$)
@@ -470,6 +472,9 @@ export function montarResumo(
     const primeiro = 3 * Number(nTrim) - 2;
     const faltando = [primeiro, primeiro + 1].map(m => `${ano}-${String(m).padStart(2, '0')}`)
       .filter(c => !(saldos.meses_trimestre_apurados ?? []).includes(c));
+    if (saldos.trimestre_desatualizado?.length) {
+      alertas.push(`${mensagemTrimestreDesatualizado(saldos.trimestre_desatualizado)} Até lá, IRPJ, adicional e CSLL abaixo usam a base antiga.`);
+    }
     if (faltando.length) {
       alertas.push(`Fechamento do trimestre sem a apuração de ${faltando.map(c => c.split('-').reverse().join('/')).join(' e ')}: IRPJ/CSLL ficam só com a base deste mês. Capture e apure esses meses.`);
     }
@@ -628,6 +633,7 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
     base_irpj_trimestre_anterior: Number(trimRes.rows[0]?.['base'] ?? 0),
     base_csll_trimestre_anterior: Number(trimRes.rows[0]?.['base_csll'] ?? 0),
     meses_trimestre_apurados: ((trimRes.rows[0]?.['meses'] ?? []) as string[]).map(String),
+    trimestre_desatualizado: await mesesTrimestreDesatualizados(empresaId, competencia, trimestre),
     rbt12_historico: await buscarRBT12(empresaId, competencia),
     faturamento_meses_ano: Object.fromEntries(anoRes.rows.map(r => [String(r['competencia']), Number(r['valor'])])),
     faturamento_informado: Object.fromEntries(infRes.rows.map(r => [String(r['competencia']), Number(r['valor'])])),
