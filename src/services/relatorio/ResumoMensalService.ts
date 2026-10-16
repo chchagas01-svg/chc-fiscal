@@ -15,7 +15,10 @@
 import { query } from '../../config/database';
 import { parseXml } from '../parsers';
 import { classificarEntrada, cfopDeEntrada, classificarSaida, FinalidadeEntrada } from '../engine/cfop';
-import { identificarTrimestre } from '../engine/lucroPresumido';
+import {
+  identificarTrimestre, limiteAcrescimoDisponivel, t2, receitaExcedente, basePresumidaComAcrescimo,
+  VIGENCIA_ACRESCIMO_IRPJ, VIGENCIA_ACRESCIMO_CSLL,
+} from '../engine/lucroPresumido';
 import { calcularDifalItem } from '../engine/difal';
 import { buscarRBT12, resolverRbt12, mesesTrimestreDesatualizados, mensagemTrimestreDesatualizado } from '../engine/ApuracaoService';
 import { calcularSimples } from '../engine/simplesNacional';
@@ -103,6 +106,10 @@ export interface SaldosAnteriores {
   base_csll_trimestre_anterior?: number;
   // Meses do trimestre já apurados antes da competência ('YYYY-MM')
   meses_trimestre_apurados?: string[];
+  // Soma do IR (15%) e da CSLL (9%) de cada mês anterior do trimestre, truncados mês a mês
+  irpj_trimestre_anterior?: number;
+  receitas_trimestre_anterior?: { servicos: number; comercio: number; industria: number };
+  csll_trimestre_anterior?: number;
   // Meses anteriores do trimestre cuja apuração gravada não bate com as notas atuais
   trimestre_desatualizado?: { competencia: string; apurado: number; notas: number }[];
   // Faturamento das notas de saída dos 12 meses anteriores à competência
@@ -439,24 +446,49 @@ export function montarResumo(
   };
 
   const presServ = empresa.presuncao_irpj ?? empresa.presuncao_servicos ?? 0.32;
-  const baseIrpj = r2(receitaServicos * presServ +
-    receitaComercio * (empresa.presuncao_comercio ?? 0.08) +
-    receitaIndustria * (empresa.presuncao_industria ?? 0.08));
-  const baseCsll = r2(receitaServicos * (empresa.presuncao_csll ?? 0.32) +
-    (receitaComercio + receitaIndustria) * PRESUNCAO_CSLL_MERCADORIAS);
+  // LC 224/2025: receita do trimestre acima do limite (R$ 1,25 mi + saldo dos trimestres anteriores)
+  // tem a presunção acrescida de 10%. Base do mês = base acumulada do trimestre − já apurada nos meses anteriores.
+  const [anoN, mesN] = competencia.split('-').map(Number) as [number, number];
+  const inicioTrim = `${anoN}-${String(3 * Math.ceil(mesN / 3) - 2).padStart(2, '0')}`;
+  const limiteLc224 = limiteAcrescimoDisponivel(inicioTrim,
+    { ...(saldos.faturamento_meses_ano ?? {}), ...(saldos.faturamento_informado ?? {}) });
+  const antTrim = saldos.receitas_trimestre_anterior ?? { servicos: 0, comercio: 0, industria: 0 };
+  const cumServ = receitaServicos + antTrim.servicos;
+  const cumCom = receitaComercio + antTrim.comercio;
+  const cumInd = receitaIndustria + antTrim.industria;
+  const excedenteLc224 = receitaExcedente(cumServ + cumCom + cumInd, limiteLc224);
+  const baseIrpjCum = basePresumidaComAcrescimo([
+    [cumServ, presServ],
+    [cumCom, empresa.presuncao_comercio ?? 0.08],
+    [cumInd, empresa.presuncao_industria ?? 0.08],
+  ], competencia >= VIGENCIA_ACRESCIMO_IRPJ ? excedenteLc224 : 0);
+  const baseCsllCum = basePresumidaComAcrescimo([
+    [cumServ, empresa.presuncao_csll ?? 0.32],
+    [cumCom + cumInd, PRESUNCAO_CSLL_MERCADORIAS],
+  ], competencia >= VIGENCIA_ACRESCIMO_CSLL ? excedenteLc224 : 0);
+  const baseIrpj = r2(baseIrpjCum - saldos.base_irpj_trimestre_anterior);
+  const baseCsll = r2(baseCsllCum - (saldos.base_csll_trimestre_anterior ?? 0));
+  if (excedenteLc224 > 0 && competencia >= VIGENCIA_ACRESCIMO_IRPJ) {
+    alertas.push(`LC 224/2025: a receita do trimestre até este mês passa R$ ${excedenteLc224.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} do limite de R$ ${limiteLc224.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}; presunção acrescida de 10% nessa parte.`);
+  }
 
   const pisApurado = r2(faturamento * ALIQ_PIS);
   const cofinsApurado = r2(faturamento * ALIQ_COFINS);
   // Adicional: 10% sobre o que a base do trimestre até agora passa de R$ 20 mil por mês decorrido
   const mesNoTrim = ((mes! - 1) % 3) + 1;
   const baseTrim = r2(saldos.base_irpj_trimestre_anterior + baseIrpj);
-  const adicionalTrim = r2(Math.max(0, baseTrim - LIMITE_ADICIONAL_MES * mesNoTrim) * ALIQ_IRPJ_ADICIONAL);
+  const adicionalTrim = t2(Math.max(0, baseTrim - LIMITE_ADICIONAL_MES * mesNoTrim) * ALIQ_IRPJ_ADICIONAL);
   // 3º mês: IRPJ e CSLL do trimestre inteiro (bases dos meses anteriores vêm das apurações)
   const fechaTrimestre = mesNoTrim === 3;
   const baseIrpjLinha = fechaTrimestre ? baseTrim : baseIrpj;
   const baseCsllLinha = fechaTrimestre ? r2((saldos.base_csll_trimestre_anterior ?? 0) + baseCsll) : baseCsll;
-  const irpjApurado = r2(baseIrpjLinha * ALIQ_IRPJ);
-  const csllApurado = r2(baseCsllLinha * ALIQ_CSLL);
+  // Como o Qyon: IR e CSLL de cada mês truncados em centavos e somados no fechamento
+  const irpjApurado = fechaTrimestre
+    ? r2((saldos.irpj_trimestre_anterior ?? t2(saldos.base_irpj_trimestre_anterior * ALIQ_IRPJ)) + t2(baseIrpj * ALIQ_IRPJ))
+    : t2(baseIrpj * ALIQ_IRPJ);
+  const csllApurado = fechaTrimestre
+    ? r2((saldos.csll_trimestre_anterior ?? t2((saldos.base_csll_trimestre_anterior ?? 0) * ALIQ_CSLL)) + t2(baseCsll * ALIQ_CSLL))
+    : t2(baseCsll * ALIQ_CSLL);
 
   const dPis = deduzir(pisApurado, retSofrida.pis);
   const dCofins = deduzir(cofinsApurado, retSofrida.cofins);
@@ -606,6 +638,9 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
   const trimestre = identificarTrimestre(competencia);
   const trimRes = await query<Record<string, unknown>>(
     `SELECT COALESCE(SUM(base_irpj), 0) AS base, COALESCE(SUM(base_csll), 0) AS base_csll,
+            COALESCE(SUM(receita_servicos), 0) AS rs, COALESCE(SUM(receita_comercio), 0) AS rc,
+            COALESCE(SUM(receita_industria), 0) AS ri,
+            COALESCE(SUM(TRUNC(base_irpj * 0.15, 2)), 0) AS irpj, COALESCE(SUM(TRUNC(base_csll * 0.09, 2)), 0) AS csll,
             COALESCE(ARRAY_AGG(competencia) FILTER (WHERE competencia IS NOT NULL), '{}') AS meses
        FROM apuracoes
       WHERE empresa_id = $1 AND trimestre = $2 AND competencia < $3`,
@@ -632,6 +667,13 @@ export async function gerarResumoMensal(empresaId: number, competencia: string, 
     retencoes: { pis: Number(ret.pis ?? 0), cofins: Number(ret.cofins ?? 0), csll: Number(ret.csll ?? 0), irrf: Number(ret.irrf ?? 0), inss: Number(ret.inss ?? 0) },
     base_irpj_trimestre_anterior: Number(trimRes.rows[0]?.['base'] ?? 0),
     base_csll_trimestre_anterior: Number(trimRes.rows[0]?.['base_csll'] ?? 0),
+    irpj_trimestre_anterior: Number(trimRes.rows[0]?.['irpj'] ?? 0),
+    receitas_trimestre_anterior: {
+      servicos: Number(trimRes.rows[0]?.['rs'] ?? 0),
+      comercio: Number(trimRes.rows[0]?.['rc'] ?? 0),
+      industria: Number(trimRes.rows[0]?.['ri'] ?? 0),
+    },
+    csll_trimestre_anterior: Number(trimRes.rows[0]?.['csll'] ?? 0),
     meses_trimestre_apurados: ((trimRes.rows[0]?.['meses'] ?? []) as string[]).map(String),
     trimestre_desatualizado: await mesesTrimestreDesatualizados(empresaId, competencia, trimestre),
     rbt12_historico: await buscarRBT12(empresaId, competencia),
