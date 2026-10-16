@@ -333,6 +333,8 @@ header a.back:hover { background: var(--surface-2); }
         row('Receita de Serviços',          fmtR(d.receita_servicos || 0)),
         row('Receita de Comércio',          fmtR(d.receita_comercio || 0)),
         row('Presunção Serviços',           pct(ent.presuncao_irpj || 0)),
+        (ent.lc224 ? rowSub('Limite LC 224 do trimestre', fmtR(ent.lc224.limite_inicio_trim)) : ''),
+        ((res.receita_excedente_trim || 0) > 0 && ent.lc224 && ent.lc224.vigente_irpj ? rowSub('Receita excedente no trimestre (presunção + 10%)', fmtR(res.receita_excedente_trim)) : ''),
         rowSub('Base IRPJ apurada este mês', fmtR(res.base_irpj_mes || 0)),
         rowSub('Base acumulada trimestre',   fmtR(d.base_irpj || 0)),
         row('Alíquota IRPJ',               '15%'),
@@ -350,6 +352,7 @@ header a.back:hover { background: var(--surface-2); }
       html += card('CSLL — Lucro Presumido', [
         row('Receita de Serviços',          fmtR(d.receita_servicos || 0)),
         row('Presunção CSLL (base hosp.)',   pct(ent.presuncao_csll || 0)),
+        ((res.receita_excedente_trim || 0) > 0 && ent.lc224 && ent.lc224.vigente_csll ? rowSub('Receita excedente no trimestre (presunção + 10%)', fmtR(res.receita_excedente_trim)) : ''),
         rowSub('Base CSLL este mês',        fmtR(res.base_csll_mes || 0)),
         rowSub('Base acumulada trimestre',  fmtR(d.base_csll || 0)),
         row('Alíquota CSLL',               '9%'),

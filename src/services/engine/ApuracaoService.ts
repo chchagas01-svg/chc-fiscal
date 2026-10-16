@@ -1,6 +1,9 @@
 import { query } from '../../config/database';
 import { calcularSimples, SaldoRetencoes } from './simplesNacional';
-import { calcularPresumido, mesDotrimestre, identificarTrimestre } from './lucroPresumido';
+import {
+  calcularPresumido, mesDotrimestre, identificarTrimestre,
+  limiteAcrescimoDisponivel, VIGENCIA_ACRESCIMO_IRPJ, VIGENCIA_ACRESCIMO_CSLL,
+} from './lucroPresumido';
 import { AnexoSimples } from './tabelasSimples';
 import { CFOPS_VENDA_PRODUCAO } from './cfop';
 
@@ -194,9 +197,32 @@ export function mensagemTrimestreDesatualizado(meses: { competencia: string; apu
     `Apure esses meses de novo antes de fechar o trimestre.`;
 }
 
-async function buscarBaseAcumuladaTrimestre(empresaId: number, competencia: string, trimestre: string): Promise<{ base_irpj: number; base_csll: number }> {
+// Receita bruta de cada mês do ano antes da competência (para o limite da LC 224/2025).
+// Vale o faturamento informado quando houver (meses sem XML capturado); senão, as notas.
+export async function receitasDoAnoAntes(empresaId: number, competencia: string): Promise<Record<string, number>> {
+  const inicio = `${competencia.substring(0, 4)}-01`;
+  const notas = await query<{ competencia: string; valor: string }>(
+    `SELECT competencia, COALESCE(SUM(valor_bruto), 0) AS valor FROM notas
+      WHERE empresa_id = $1 AND competencia >= $2 AND competencia < $3
+        AND NOT cancelada AND natureza IN ('servico_prestado', 'venda')
+      GROUP BY competencia`,
+    [empresaId, inicio, competencia]
+  );
+  const informado = await query<{ competencia: string; valor: string }>(
+    `SELECT competencia, valor FROM faturamento_informado
+      WHERE empresa_id = $1 AND competencia >= $2 AND competencia < $3`,
+    [empresaId, inicio, competencia]
+  );
+  const out: Record<string, number> = {};
+  for (const r of notas.rows) out[String(r.competencia)] = Number(r.valor);
+  for (const r of informado.rows) out[String(r.competencia)] = Number(r.valor);
+  return out;
+}
+
+async function buscarBaseAcumuladaTrimestre(empresaId: number, competencia: string, trimestre: string): Promise<{ base_irpj: number; base_csll: number; irpj: number; csll: number }> {
   const r = await query(
-    `SELECT COALESCE(SUM(base_irpj), 0) AS base_irpj, COALESCE(SUM(base_csll), 0) AS base_csll
+    `SELECT COALESCE(SUM(base_irpj), 0) AS base_irpj, COALESCE(SUM(base_csll), 0) AS base_csll,
+            COALESCE(SUM(TRUNC(base_irpj * 0.15, 2)), 0) AS irpj, COALESCE(SUM(TRUNC(base_csll * 0.09, 2)), 0) AS csll
      FROM apuracoes
      WHERE empresa_id = $1 AND trimestre = $2 AND competencia < $3`,
     [empresaId, trimestre, competencia]
@@ -204,6 +230,8 @@ async function buscarBaseAcumuladaTrimestre(empresaId: number, competencia: stri
   return {
     base_irpj: Number(r.rows[0]?.['base_irpj'] ?? 0),
     base_csll: Number(r.rows[0]?.['base_csll'] ?? 0),
+    irpj: Number(r.rows[0]?.['irpj'] ?? 0),
+    csll: Number(r.rows[0]?.['csll'] ?? 0),
   };
 }
 
@@ -391,7 +419,7 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
     // Lucro Presumido
     const trimestre = identificarTrimestre(competencia);
     const mesTrim = mesDotrimestre(competencia);
-    const { base_irpj: baseAcumIrpj, base_csll: baseAcumCsll } =
+    const { base_irpj: baseAcumIrpj, base_csll: baseAcumCsll, irpj: irpjAcum, csll: csllAcum } =
       await buscarBaseAcumuladaTrimestre(empresaId, competencia, trimestre);
     const desatualizados = mesTrim === 3 ? await mesesTrimestreDesatualizados(empresaId, competencia, trimestre) : [];
 
@@ -402,7 +430,27 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
     }
     const icmsSaldoAnterior = temIcms ? Number(saldoAnt.icms_saldo_credor ?? 0) : 0;
 
+    // LC 224/2025: limite de R$ 1,25 mi por trimestre (com saldo dos anteriores) antes do acréscimo de 10%
+    const inicioTrim = `${competencia.substring(0, 5)}${String(3 * Number(trimestre.split('-T')[1]) - 2).padStart(2, '0')}`;
+    const limiteInicioTrim = limiteAcrescimoDisponivel(inicioTrim, await receitasDoAnoAntes(empresaId, inicioTrim));
+    const antTrim = await query<{ s: string; c: string; i: string }>(
+      `SELECT COALESCE(SUM(receita_servicos), 0) AS s, COALESCE(SUM(receita_comercio), 0) AS c,
+              COALESCE(SUM(receita_industria), 0) AS i
+         FROM apuracoes WHERE empresa_id = $1 AND trimestre = $2 AND competencia < $3`,
+      [empresaId, trimestre, competencia]
+    );
+
     const entrada = {
+      lc224: {
+        limite_inicio_trim: limiteInicioTrim,
+        receitas_trim_anteriores: {
+          servicos: Number(antTrim.rows[0]?.s ?? 0),
+          comercio: Number(antTrim.rows[0]?.c ?? 0),
+          industria: Number(antTrim.rows[0]?.i ?? 0),
+        },
+        vigente_irpj: competencia >= VIGENCIA_ACRESCIMO_IRPJ,
+        vigente_csll: competencia >= VIGENCIA_ACRESCIMO_CSLL,
+      },
       receita_servicos:    totais.receita_servicos,
       receita_comercio:    totais.receita_comercio,
       receita_industria:   totais.receita_industria,
@@ -415,6 +463,8 @@ export async function apurarEmpresa(empresaId: number, competencia: string): Pro
       mes_do_trimestre:    mesTrim,
       base_irpj_acumulada_trim: baseAcumIrpj,
       base_csll_acumulada_trim: baseAcumCsll,
+      irpj_acumulado_trim: irpjAcum,
+      csll_acumulada_trim: csllAcum,
       icms_saldo_anterior: icmsSaldoAnterior,
       icms_debitos_mes:    temIcms ? totais.icms_debito : 0,
       icms_creditos_mes:   temIcms ? totais.icms_credito : 0,

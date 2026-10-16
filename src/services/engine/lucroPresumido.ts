@@ -11,6 +11,51 @@ const PRESUNCAO_CSLL_MERCADORIAS = 0.12;
 
 export type MesTrimestre = 1 | 2 | 3; // posição do mês dentro do trimestre
 
+// LC 224/2025: a receita bruta que passa de R$ 5 milhões no ano (R$ 1,25 milhão por trimestre)
+// tem os percentuais de presunção acrescidos de 10% (ex.: 8% → 8,8%; CSLL 12% → 13,2%).
+// O limite não usado num trimestre passa para o seguinte, dentro do mesmo ano.
+export const LIMITE_ACRESCIMO_TRIMESTRE = 1_250_000;
+export const ACRESCIMO_PRESUNCAO = 0.10;
+export const VIGENCIA_ACRESCIMO_IRPJ = '2026-01';
+export const VIGENCIA_ACRESCIMO_CSLL = '2026-04'; // noventena da CSLL
+
+// Limite de receita ainda disponível no início do mês (sem acréscimo de presunção).
+// receitasAnteriores: receita bruta de cada mês do mesmo ano antes da competência, { 'YYYY-MM': valor }
+export function limiteAcrescimoDisponivel(competencia: string, receitasAnteriores: Record<string, number>): number {
+  const [ano, mes] = competencia.split('-').map(Number) as [number, number];
+  const trimAtual = Math.ceil(mes / 3);
+  const receitaDoMes = (m: number) => receitasAnteriores[`${ano}-${String(m).padStart(2, '0')}`] ?? 0;
+  let saldo = 0;
+  for (let t = 1; t < trimAtual; t++) {
+    const receitaTrim = receitaDoMes(3 * t - 2) + receitaDoMes(3 * t - 1) + receitaDoMes(3 * t);
+    saldo = Math.max(0, LIMITE_ACRESCIMO_TRIMESTRE + saldo - receitaTrim);
+  }
+  let disponivel = LIMITE_ACRESCIMO_TRIMESTRE + saldo;
+  for (let m = 3 * trimAtual - 2; m < mes; m++) disponivel -= receitaDoMes(m);
+  return r2(Math.max(0, disponivel));
+}
+
+// Truncado em centavos, como o Qyon faz nas bases e no IR de cada mês
+export function t2(v: number): number {
+  return Math.floor(v * 100 + 1e-6) / 100;
+}
+
+// Parte da receita do mês que passa do limite disponível
+export function receitaExcedente(receitaMes: number, limiteDisponivel: number): number {
+  return r2(Math.max(0, receitaMes - Math.max(0, limiteDisponivel)));
+}
+
+// Base presumida com o acréscimo de 10% sobre a fração excedente, rateada entre as atividades.
+// parcelas: [receita, presunção] de cada atividade
+export function basePresumidaComAcrescimo(parcelas: [number, number][], excedente: number): number {
+  const total = parcelas.reduce((s, [v]) => s + v, 0);
+  if (total <= 0) return 0;
+  const f = Math.min(1, Math.max(0, excedente) / total);
+  const normal = parcelas.reduce((s, [v, p]) => s + v * (1 - f) * p, 0);
+  const acrescida = parcelas.reduce((s, [v, p]) => s + v * f * p * (1 + ACRESCIMO_PRESUNCAO), 0);
+  return r2(t2(normal) + t2(acrescida));
+}
+
 export interface EntradaPresumido {
   receita_servicos: number;
   receita_comercio: number;
@@ -26,9 +71,21 @@ export interface EntradaPresumido {
   aliquota_iss: number;          // alíquota ISS municipal da empresa
   mes_do_trimestre: MesTrimestre; // 1=primeiro, 2=segundo, 3=último do trim
 
+  // LC 224/2025. A base do mês sai da base acumulada do trimestre (truncada) menos a já apurada
+  // nos meses anteriores, como o Qyon: assim o fechamento sempre fecha com o trimestre inteiro.
+  lc224?: {
+    limite_inicio_trim: number; // limite disponível no início do trimestre (R$ 1,25 mi + saldo)
+    receitas_trim_anteriores: { servicos: number; comercio: number; industria: number };
+    vigente_irpj: boolean;
+    vigente_csll: boolean;
+  };
+
   // Trimestre acumulado (bases Jul+Ago quando processando Set)
   base_irpj_acumulada_trim: number;
   base_csll_acumulada_trim: number;
+  // IR e CSLL (15% / 9%) de cada mês anterior do trimestre, somados — o fechamento soma mês a mês
+  irpj_acumulado_trim?: number;
+  csll_acumulada_trim?: number;
 
   // ICMS
   icms_saldo_anterior: number;
@@ -48,6 +105,7 @@ export interface ResultadoPresumido {
   receita_industria: number;
 
   // Bases de cálculo
+  receita_excedente_trim: number; // LC 224/2025: receita do trimestre até o mês acima do limite
   base_irpj: number;
   base_csll: number;
 
@@ -121,16 +179,27 @@ export function calcularPresumido(entrada: EntradaPresumido): ResultadoOuTravaPr
   }
 
   const receitaTotal = r2(entrada.receita_servicos + entrada.receita_comercio + entrada.receita_industria);
-  const baseIrpj = r2(
-    entrada.receita_servicos * entrada.presuncao_irpj +
-    entrada.receita_comercio * entrada.presuncao_comercio +
-    entrada.receita_industria * entrada.presuncao_industria
-  );
+  const lc = entrada.lc224;
+  const ant = lc?.receitas_trim_anteriores ?? { servicos: 0, comercio: 0, industria: 0 };
+  const cumServ = entrada.receita_servicos + ant.servicos;
+  const cumCom = entrada.receita_comercio + ant.comercio;
+  const cumInd = entrada.receita_industria + ant.industria;
+  const excedenteTrim = lc ? receitaExcedente(cumServ + cumCom + cumInd, lc.limite_inicio_trim) : 0;
+  const baseIrpjTrimAteMes = basePresumidaComAcrescimo([
+    [cumServ, entrada.presuncao_irpj],
+    [cumCom, entrada.presuncao_comercio],
+    [cumInd, entrada.presuncao_industria],
+  ], lc?.vigente_irpj ? excedenteTrim : 0);
   // CSLL: presunção da empresa só sobre serviços; venda de mercadorias/produtos é sempre 12%
-  const baseCsll = r2(
-    entrada.receita_servicos * entrada.presuncao_csll +
-    (entrada.receita_comercio + entrada.receita_industria) * PRESUNCAO_CSLL_MERCADORIAS
-  );
+  const baseCsllTrimAteMes = basePresumidaComAcrescimo([
+    [cumServ, entrada.presuncao_csll],
+    [cumCom + cumInd, PRESUNCAO_CSLL_MERCADORIAS],
+  ], lc?.vigente_csll ? excedenteTrim : 0);
+  const baseIrpj = lc ? r2(baseIrpjTrimAteMes - entrada.base_irpj_acumulada_trim) : baseIrpjTrimAteMes;
+  const baseCsll = lc ? r2(baseCsllTrimAteMes - entrada.base_csll_acumulada_trim) : baseCsllTrimAteMes;
+  if (excedenteTrim > 0 && lc?.vigente_irpj) {
+    alertas.push(`LC 224/2025: receita do trimestre até este mês passa R$ ${excedenteTrim.toFixed(2)} do limite (R$ ${lc.limite_inicio_trim.toFixed(2)}); presunção acrescida de 10% nessa parte.`);
+  }
 
   // PIS e COFINS (cumulativo — sempre mensais)
   const pisBruto = r2(receitaTotal * ALIQ_PIS);
@@ -174,17 +243,17 @@ export function calcularPresumido(entrada: EntradaPresumido): ResultadoOuTravaPr
     baseIrpjTrim = r2(entrada.base_irpj_acumulada_trim + baseIrpj);
     baseCsllTrim = r2(entrada.base_csll_acumulada_trim + baseCsll);
 
-    irpjBruto = r2(baseIrpjTrim * ALIQ_IRPJ);
+    irpjBruto = r2((entrada.irpj_acumulado_trim ?? t2(entrada.base_irpj_acumulada_trim * ALIQ_IRPJ)) + t2(baseIrpj * ALIQ_IRPJ));
 
     // Adicional de 10% sobre a parcela da base que passa de R$ 60.000 no trimestre (Lei 9.430/96, art. 4º)
-    irpjAdicional = r2(Math.max(0, baseIrpjTrim - LIMITE_ADICIONAL_IRPJ) * ALIQ_IRPJ_ADICIONAL);
+    irpjAdicional = t2(Math.max(0, baseIrpjTrim - LIMITE_ADICIONAL_IRPJ) * ALIQ_IRPJ_ADICIONAL);
     if (irpjAdicional > 0) {
       alertas.push(`Adicional de IRPJ: R$ ${irpjAdicional.toFixed(2)} (base trimestral R$ ${baseIrpjTrim.toFixed(2)} > R$ 60.000).`);
     }
 
     const irpjTotal = r2(irpjBruto + irpjAdicional);
 
-    csllBruta = r2(baseCsllTrim * ALIQ_CSLL);
+    csllBruta = r2((entrada.csll_acumulada_trim ?? t2(entrada.base_csll_acumulada_trim * ALIQ_CSLL)) + t2(baseCsll * ALIQ_CSLL));
 
     // Dedução de CSLL e IRRF das suas retenções respectivas
     const { deducao: dedCsll, impostoFinal: csllFinal, saldoProximo: spCsllLocal } = deduzirRetencao(csllBruta, ret.csll);
@@ -217,6 +286,7 @@ export function calcularPresumido(entrada: EntradaPresumido): ResultadoOuTravaPr
       receita_servicos: entrada.receita_servicos,
       receita_comercio: entrada.receita_comercio,
       receita_industria: entrada.receita_industria,
+      receita_excedente_trim: excedenteTrim,
       base_irpj: baseIrpj,
       base_csll: baseCsll,
       pis_bruto: pisBruto,
