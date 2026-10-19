@@ -1,22 +1,25 @@
 import { Router } from 'express';
 import { setQyonTokens } from '../services/qyon/QyonClient';
 import { query } from '../config/database';
+import { solicitarExclusaoMes, ErroExclusao } from '../services/exclusao/ExclusaoService';
 
 const router = Router();
 
-// DELETE /v1/admin/notas/:competencia/:empresaId — limpa notas de uma empresa/competência para reimportar
+// DELETE /v1/admin/notas/:competencia/:empresaId — pede a limpeza das notas de uma empresa/competência
+// para reimportar. Não apaga: cria um pedido (202) a autorizar em POST /v1/notas/exclusoes/:id/autorizar
 router.delete('/notas/:competencia/:empresaId', async (req, res) => {
   const { competencia, empresaId } = req.params;
   if (!competencia || !empresaId) {
     return res.status(400).json({ erro: 'competencia e empresaId são obrigatórios' });
   }
-  const result = await query(
-    `DELETE FROM notas WHERE competencia = $1 AND empresa_id = $2`,
-    [competencia, Number(empresaId)]
-  );
-  const deletadas = result.rowCount ?? 0;
-  console.log(`[admin] ${deletadas} nota(s) deletadas — empresa=${empresaId} competencia=${competencia}`);
-  return res.json({ ok: true, deletadas });
+  try {
+    const pedido = await solicitarExclusaoMes(Number(empresaId), competencia, req.body?.motivo);
+    console.log(`[admin] exclusão pedida (#${pedido.id}) — empresa=${empresaId} competencia=${competencia}`);
+    return res.status(202).json({ ok: true, pendente: true, exclusao: pedido });
+  } catch (err) {
+    if (err instanceof ErroExclusao) return res.status(err.status).json({ erro: err.message });
+    throw err;
+  }
 });
 
 // POST /v1/admin/qyon-token — atualiza JWT e refresh_token Qyon em memória + banco
