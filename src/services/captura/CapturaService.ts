@@ -1,6 +1,6 @@
 import { query } from '../../config/database';
 import { qyonClient } from '../qyon/QyonClient';
-import { parseXml, aplicarNatureza } from '../parsers';
+import { parseXml, aplicarNatureza, parseEventoCancelamento } from '../parsers';
 import { TipoDoc, ParsedNota } from '../../types/nota';
 
 function naturezaPorFluxo(tipo: TipoDoc, fluxo: 1 | 2): ParsedNota['natureza'] {
@@ -47,6 +47,8 @@ export interface ResultadoEmpresa {
   status: 'ok' | 'erro' | 'sem_movimento';
   notas_importadas: number;
   notas_ignoradas_duplicatas: number;
+  // Notas já gravadas como normais que o Qyon agora informa canceladas
+  notas_canceladas_atualizadas: number;
   // Onde estão as notas que vieram como duplicata, ex.: { "2026-09": 80, "2026-08 (cancelada)": 2, "outra empresa": 1 }
   duplicatas_onde: Record<string, number>;
   tipos_processados: TipoDoc[];
@@ -111,6 +113,29 @@ export async function existeMesmaNfse(empresaId: number, nota: ParsedNota): Prom
   return (r.rowCount ?? 0) > 0;
 }
 
+// Nota cancelada depois de importada: a captura seguinte traz o evento de cancelamento (ou a nota
+// já cancelada), mas o INSERT ignora a chave existente e a nota continuaria como normal.
+// Marca como cancelada a nota da empresa com essa chave (NFS-e nacional é gravada com o prefixo
+// "NFS" do Id) e registra no audit_log. Retorna a nota marcada, ou null se não havia o que mudar.
+export async function marcarCanceladaPosImportacao(
+  empresaId: number,
+  chave: string,
+  origem: string,
+  dataEvento?: string
+): Promise<{ id: number; numero: string | null; competencia: string } | null> {
+  const r = await query<{ id: number; numero: string | null; competencia: string }>(
+    `UPDATE notas SET cancelada = true
+      WHERE empresa_id = $1 AND chave_acesso IN ($2, 'NFS' || $2) AND cancelada = false
+      RETURNING id, numero, competencia`,
+    [empresaId, chave]
+  );
+  const nota = r.rows[0];
+  if (!nota) return null;
+  await registrarAudit(nota.competencia, empresaId, 'nota_cancelada_pos_importacao',
+    { id: nota.id, numero: nota.numero, chave, origem, data_evento: dataEvento ?? null }, 'cancelada');
+  return nota;
+}
+
 // Retorna true se inserida, false se já existia (duplicata silenciosa)
 export async function inserirNota(empresaId: number, competencia: string, nota: ParsedNota): Promise<boolean> {
   if (!nota.cancelada && await existeMesmaNfse(empresaId, nota)) return false;
@@ -159,6 +184,7 @@ async function capturarEmpresa(
     status: 'ok',
     notas_importadas: 0,
     notas_ignoradas_duplicatas: 0,
+    notas_canceladas_atualizadas: 0,
     duplicatas_onde: {},
     tipos_processados: [],
     erros: [],
@@ -198,6 +224,14 @@ async function capturarEmpresa(
           // Download do XML
           const xml = await qyonClient.downloadXml(tipo, item.chave, empresa.qyon_access_key);
 
+          // Evento de cancelamento: não é nota nova, só atualiza a nota já gravada
+          const evento = parseEventoCancelamento(xml);
+          if (evento) {
+            const marcada = await marcarCanceladaPosImportacao(empresa.id, evento.chave, 'captura_evento', evento.dataEvento);
+            if (marcada) resultado.notas_canceladas_atualizadas++;
+            continue;
+          }
+
           // Parse
           const notas = await parseXml(xml);
 
@@ -217,7 +251,10 @@ async function capturarEmpresa(
                 { numero: nota.numero, chave: nota.chaveAcesso, capturada_em: competencia }, 'lancada');
             }
             if (inserida) resultado.notas_importadas++;
-            else {
+            else if ((notaComNatureza.cancelada || item.cancelada === true) &&
+                     await marcarCanceladaPosImportacao(empresa.id, notaComNatureza.chaveAcesso, 'captura_nota_cancelada')) {
+              resultado.notas_canceladas_atualizadas++;
+            } else {
               resultado.notas_ignoradas_duplicatas++;
               const onde = await localizarDuplicata(empresa.id, notaComNatureza.chaveAcesso);
               resultado.duplicatas_onde[onde] = (resultado.duplicatas_onde[onde] ?? 0) + 1;
@@ -238,7 +275,8 @@ async function capturarEmpresa(
     }
   }
 
-  if (resultado.notas_importadas === 0 && resultado.notas_ignoradas_duplicatas === 0 && resultado.erros.length === 0) {
+  if (resultado.notas_importadas === 0 && resultado.notas_ignoradas_duplicatas === 0 &&
+      resultado.notas_canceladas_atualizadas === 0 && resultado.erros.length === 0) {
     resultado.status = 'sem_movimento';
   } else if (resultado.erros.length > 0 && resultado.notas_importadas === 0) {
     resultado.status = 'erro';
@@ -251,6 +289,7 @@ async function capturarEmpresa(
   console.log(
     `[captura] ${empresa.cnpj} CONCLUÍDO: ` +
     `importadas=${resultado.notas_importadas} duplicatas=${resultado.notas_ignoradas_duplicatas} ` +
+    `canceladas_atualizadas=${resultado.notas_canceladas_atualizadas} ` +
     `erros=${resultado.erros.length} status=${resultado.status}` +
     (resultado.erros.length > 0 ? ` | ${resultado.erros.slice(0, 3).join(' | ')}` : '')
   );
@@ -263,7 +302,8 @@ async function capturarEmpresa(
     competencia,
     empresa.id,
     'captura_concluida',
-    { importadas: resultado.notas_importadas, duplicatas: resultado.notas_ignoradas_duplicatas, duplicatas_onde: resultado.duplicatas_onde },
+    { importadas: resultado.notas_importadas, duplicatas: resultado.notas_ignoradas_duplicatas,
+      canceladas_atualizadas: resultado.notas_canceladas_atualizadas, duplicatas_onde: resultado.duplicatas_onde },
     resultado.status
   );
 
@@ -301,6 +341,7 @@ export async function capturar(competencia: string, cnpjs?: string[]): Promise<R
             status: 'erro' as const,
             notas_importadas: 0,
             notas_ignoradas_duplicatas: 0,
+            notas_canceladas_atualizadas: 0,
             duplicatas_onde: {},
             tipos_processados: [],
             erros: [msg],

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { query } from '../config/database';
-import { parseXml, aplicarNatureza } from '../services/parsers';
-import { inserirNota, competenciaDaNota } from '../services/captura/CapturaService';
+import { parseXml, aplicarNatureza, parseEventoCancelamento } from '../services/parsers';
+import { inserirNota, competenciaDaNota, marcarCanceladaPosImportacao } from '../services/captura/CapturaService';
 import { ParsedNota } from '../types/nota';
 
 const router = Router();
@@ -38,7 +38,17 @@ router.post('/importar-xml', async (req, res) => {
   for (const arq of xmls) {
     const nome = arq.nome ?? 'xml';
     try {
-      const notas = await parseXml(String(arq.conteudo ?? '').replace(/^﻿/, ''));
+      const conteudo = String(arq.conteudo ?? '').replace(/^﻿/, '');
+      // Evento de cancelamento: marca a nota já importada como cancelada
+      const evento = parseEventoCancelamento(conteudo);
+      if (evento) {
+        const marcada = await marcarCanceladaPosImportacao(empresa.id, evento.chave, 'importar_xml_evento', evento.dataEvento);
+        resultados.push(marcada
+          ? { arquivo: nome, numero: marcada.numero, competencia: marcada.competencia, status: 'cancelada' }
+          : { arquivo: nome, status: 'erro', erro: `Cancelamento da chave ${evento.chave}: nota não encontrada nesta empresa ou já cancelada` });
+        continue;
+      }
+      const notas = await parseXml(conteudo);
       for (const nota of notas) {
         const natureza = naturezaParaEmpresa(nota, cnpjEmpresa);
         if (!natureza) {
@@ -61,6 +71,7 @@ router.post('/importar-xml', async (req, res) => {
   return res.json({
     importadas: resultados.filter(r => r['status'] === 'importada').length,
     duplicadas: resultados.filter(r => r['status'] === 'duplicada').length,
+    canceladas: resultados.filter(r => r['status'] === 'cancelada').length,
     erros:      resultados.filter(r => r['status'] === 'erro').length,
     resultados,
   });

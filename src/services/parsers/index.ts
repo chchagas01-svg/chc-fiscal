@@ -6,6 +6,8 @@ import { parseNfe } from './parseNfe';
 import { parseCte } from './parseCte';
 import { classificarSaida } from '../engine/cfop';
 
+export { parseEventoCancelamento, EventoCancelamento } from './parseEventoCancelamento';
+
 // Detecta tipo de XML pela primeira tag raiz significativa
 function detectRootTag(xml: string): string {
   const match = xml.match(/<([A-Za-z][A-Za-z0-9_:]*)[\s>]/);
