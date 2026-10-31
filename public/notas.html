@@ -272,6 +272,7 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
     <input type="file" id="inp-xml" accept=".xml,text/xml" multiple style="display:none">
     <button class="btn-nova" id="btn-cancelar-copias" style="align-self:flex-end" disabled title="Cancela as cópias da mesma NFS-e (mesmo emitente, número, data e valor) que entraram com chaves diferentes">Cancelar cópias duplicadas</button>
     <button class="btn-nova" id="btn-excluir-mes" style="align-self:flex-end;background:var(--err)" disabled>Excluir todas do mês</button>
+    <button class="btn-nova" id="btn-exclusoes" style="align-self:flex-end;background:var(--surface-2);color:var(--fg);border:1px solid var(--border)" title="Pedidos de exclusão aguardando autorização">Exclusões pendentes</button>
   </div>
 
   <!-- TOAST -->
@@ -398,11 +399,43 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
     </div>
   </div>
 
+  <!-- MODAL AUTORIZAR EXCLUSÃO -->
+  <div id="modal-aut" class="modal-bg" style="display:none">
+    <div class="modal-box" style="max-width:420px">
+      <div class="modal-title">Autorizar exclusão</div>
+      <p id="aut-desc" style="font-size:13px;color:var(--fg-2)"></p>
+      <div class="field">
+        <label>Quem autoriza</label>
+        <input type="text" id="aut-resp" autocomplete="name">
+      </div>
+      <div class="field">
+        <label>Senha de autorização</label>
+        <input type="password" id="aut-senha" autocomplete="off">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-m btn-m-ghost" id="btn-aut-depois" style="margin-right:auto">Deixar pendente</button>
+        <button class="btn-m btn-m-ghost" id="btn-aut-recusar">Recusar</button>
+        <button class="btn-m btn-m-danger" id="btn-aut-ok">Autorizar e excluir</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL EXCLUSÕES PENDENTES -->
+  <div id="modal-excl" class="modal-bg" style="display:none">
+    <div class="modal-box" style="max-width:640px">
+      <div class="modal-title">Exclusões pendentes</div>
+      <div id="excl-lista" style="font-size:13px"></div>
+      <div class="modal-actions">
+        <button class="btn-m btn-m-ghost" id="btn-excl-fechar">Fechar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL CONFIRMAR EXCLUSÃO -->
   <div id="modal-del" class="modal-bg" style="display:none">
     <div class="modal-box" style="max-width:380px">
       <div class="modal-title">Excluir nota?</div>
-      <p style="font-size:13px;color:var(--fg-2)">Esta ação remove permanentemente a nota do banco. Prefira "Cancelar" se quiser apenas marcá-la como cancelada.</p>
+      <p style="font-size:13px;color:var(--fg-2)">Esta ação remove permanentemente a nota do banco e só é feita com a senha de autorização. Prefira "Cancelar" se quiser apenas marcá-la como cancelada.</p>
       <div class="modal-actions">
         <button class="btn-m btn-m-ghost" id="btn-del-cancel">Voltar</button>
         <button class="btn-m btn-m-danger" id="btn-del-confirm">Excluir</button>
@@ -1115,8 +1148,74 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
         method: 'DELETE', headers: headers()
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      toast('Nota excluída permanentemente', 'ok');
+      const d = await r.json();
+      abrirAutorizacao(d.exclusao);
+    } catch(e) { toast('Erro: ' + e.message, 'err'); }
+  });
+
+  // ── Trava de exclusão: autorizar com a senha ────────
+  let _exclusao = null;
+  function descreverExclusao(x) {
+    const quem = x.empresa_nome ? x.empresa_nome + ', ' : '';
+    return x.tipo === 'mes'
+      ? 'Excluir todas as ' + x.qtd_notas + ' nota(s) de ' + quem + 'competência ' + x.competencia + ' (R$ ' + fmt(Number(x.valor_total)) + ').'
+      : 'Excluir 1 nota de ' + quem + 'competência ' + x.competencia + ' (R$ ' + fmt(Number(x.valor_total)) + ').';
+  }
+  function abrirAutorizacao(x) {
+    _exclusao = x;
+    document.getElementById('aut-desc').textContent = descreverExclusao(x) +
+      ' As notas ficam guardadas em cópia, mas saem do sistema.';
+    document.getElementById('aut-senha').value = '';
+    document.getElementById('modal-excl').style.display = 'none';
+    document.getElementById('modal-aut').style.display = 'flex';
+  }
+  async function decidirExclusao(acao) {
+    if (!_exclusao) return;
+    const body = { responsavel: document.getElementById('aut-resp').value, senha: document.getElementById('aut-senha').value };
+    try {
+      const r = await fetch('/v1/notas/exclusoes/' + _exclusao.id + '/' + acao, {
+        method: 'POST', headers: headers(), body: JSON.stringify(body)
+      });
+      const d = await r.json().catch(function() { return {}; });
+      if (!r.ok) throw new Error(d.erro || ('HTTP ' + r.status));
+      document.getElementById('aut-senha').value = '';
+      document.getElementById('modal-aut').style.display = 'none';
+      toast(acao === 'autorizar' ? d.excluidas + ' nota(s) excluída(s).' : 'Exclusão recusada.', 'ok');
+      _exclusao = null;
       await buscar();
+    } catch(e) { toast('Erro: ' + e.message, 'err'); }
+  }
+  document.getElementById('btn-aut-ok').addEventListener('click', function() { decidirExclusao('autorizar'); });
+  document.getElementById('btn-aut-recusar').addEventListener('click', function() { decidirExclusao('recusar'); });
+  document.getElementById('btn-aut-depois').addEventListener('click', function() {
+    document.getElementById('aut-senha').value = '';
+    document.getElementById('modal-aut').style.display = 'none';
+    toast('Pedido de exclusão ficou pendente.', 'ok');
+  });
+  document.getElementById('btn-excl-fechar').addEventListener('click', function() {
+    document.getElementById('modal-excl').style.display = 'none';
+  });
+  document.getElementById('btn-exclusoes').addEventListener('click', async function() {
+    try {
+      const r = await fetch('/v1/notas/exclusoes?status=pendente', { headers: headers() });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      const lista = document.getElementById('excl-lista');
+      lista.innerHTML = '';
+      if (!d.exclusoes.length) lista.textContent = 'Nenhum pedido de exclusão pendente.';
+      d.exclusoes.forEach(function(x) {
+        const linha = document.createElement('div');
+        linha.style.cssText = 'display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)';
+        const txt = document.createElement('span');
+        txt.style.flex = '1';
+        txt.textContent = descreverExclusao(x) + ' Pedido em ' + fmtData(x.solicitado_em) + '.';
+        const btn = document.createElement('button');
+        btn.className = 'btn-act btn-act-del';
+        btn.textContent = 'Decidir';
+        btn.addEventListener('click', function() { abrirAutorizacao(x); });
+        linha.appendChild(txt); linha.appendChild(btn); lista.appendChild(linha);
+      });
+      document.getElementById('modal-excl').style.display = 'flex';
     } catch(e) { toast('Erro: ' + e.message, 'err'); }
   });
 
@@ -1323,8 +1422,7 @@ td.acoes .btn-act + .btn-act { margin-left: 4px; }
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
-      toast(d.excluidas + ' nota(s) excluída(s). Agora recapture no painel.', 'ok');
-      await buscar();
+      abrirAutorizacao(d.exclusao);
     } catch(e) { toast('Erro: ' + e.message, 'err'); }
   });
   document.getElementById('btn-cancelar-copias').addEventListener('click', async function() {

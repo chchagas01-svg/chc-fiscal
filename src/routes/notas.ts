@@ -3,8 +3,41 @@ import { query } from '../config/database';
 import { parseXml, aplicarNatureza, parseEventoCancelamento } from '../services/parsers';
 import { inserirNota, competenciaDaNota, marcarCanceladaPosImportacao } from '../services/captura/CapturaService';
 import { ParsedNota } from '../types/nota';
+import {
+  solicitarExclusaoNota, solicitarExclusaoMes, listarExclusoes, autorizarExclusao, recusarExclusao,
+  registrarCancelamentoManual, ErroExclusao,
+} from '../services/exclusao/ExclusaoService';
 
 const router = Router();
+
+// Erros da trava de exclusão viram a resposta HTTP correspondente
+function responderErroExclusao(res: import('express').Response, err: unknown) {
+  if (err instanceof ErroExclusao) return res.status(err.status).json({ erro: err.message });
+  throw err;
+}
+
+// GET /v1/notas/exclusoes?status=pendente — pedidos de exclusão (todos, se sem status)
+router.get('/exclusoes', async (req, res) => {
+  const status = req.query['status'] ? String(req.query['status']) : undefined;
+  return res.json({ exclusoes: await listarExclusoes(status) });
+});
+
+// POST /v1/notas/exclusoes/:id/autorizar — Body: { responsavel, senha }
+// Executa a exclusão; a senha é a EXCLUSAO_SENHA do servidor, não a chave da API
+router.post('/exclusoes/:id/autorizar', async (req, res) => {
+  try {
+    const r = await autorizarExclusao(Number(req.params['id']), String(req.body?.responsavel ?? ''), req.body?.senha);
+    return res.json({ ok: true, ...r });
+  } catch (err) { return responderErroExclusao(res, err); }
+});
+
+// POST /v1/notas/exclusoes/:id/recusar — Body: { responsavel? }
+router.post('/exclusoes/:id/recusar', async (req, res) => {
+  try {
+    await recusarExclusao(Number(req.params['id']), String(req.body?.responsavel ?? ''));
+    return res.json({ ok: true });
+  } catch (err) { return responderErroExclusao(res, err); }
+});
 
 // Natureza da nota do ponto de vista da empresa; null se a empresa não participa do documento
 function naturezaParaEmpresa(nota: ParsedNota, cnpjEmpresa: string): ParsedNota['natureza'] | null {
@@ -406,16 +439,18 @@ router.patch('/:id', async (req, res) => {
   return res.json({ ok: true, id });
 });
 
-// DELETE /v1/notas/:id — cancela (soft) ou exclui fisicamente
-// Query param: ?excluir=true para exclusão física
+// DELETE /v1/notas/:id — cancela (soft) ou pede a exclusão física
+// Query param: ?excluir=true para exclusão física — não apaga: cria um pedido (202) que só é
+// executado em POST /v1/notas/exclusoes/:id/autorizar. Body opcional: { motivo }
 router.delete('/:id', async (req, res) => {
   const id = Number(req.params['id']);
   if (!id) return res.status(400).json({ erro: 'ID inválido' });
 
   if (req.query['excluir'] === 'true') {
-    const r = await query(`DELETE FROM notas WHERE id = $1 RETURNING id`, [id]);
-    if ((r.rowCount ?? 0) === 0) return res.status(404).json({ erro: 'Nota não encontrada' });
-    return res.json({ ok: true, excluida: true, id });
+    try {
+      const pedido = await solicitarExclusaoNota(id, req.body?.motivo);
+      return res.status(202).json({ ok: true, pendente: true, exclusao: pedido });
+    } catch (err) { return responderErroExclusao(res, err); }
   }
 
   const r = await query(
@@ -423,6 +458,7 @@ router.delete('/:id', async (req, res) => {
     [id]
   );
   if ((r.rowCount ?? 0) === 0) return res.status(404).json({ erro: 'Nota não encontrada' });
+  await registrarCancelamentoManual([id], 'painel_cancelar');
   return res.json({ ok: true, cancelada: true, id });
 });
 
@@ -449,21 +485,23 @@ router.post('/cancelar-copias', async (req, res) => {
                    RETURNING id, numero, valor_bruto::float AS valor_bruto`, [empresaId, competencia])
     : await query(`SELECT id, numero, valor_bruto::float AS valor_bruto FROM notas WHERE id IN (${copias}) ORDER BY id`,
                   [empresaId, competencia]);
+  if (req.body?.aplicar === true)
+    await registrarCancelamentoManual(r.rows.map(n => Number(n['id'])), 'cancelar_copias');
   return res.json({ ok: true, aplicado: req.body?.aplicar === true, copias: r.rowCount ?? 0, notas: r.rows });
 });
 
-// DELETE /v1/notas?empresa_id=X&competencia=YYYY-MM — exclui todas as notas do mês (para recapturar)
+// DELETE /v1/notas?empresa_id=X&competencia=YYYY-MM — pede a exclusão de todas as notas do mês
+// (para recapturar). Não apaga: cria um pedido (202) que precisa ser autorizado.
 router.delete('/', async (req, res) => {
   const empresaId = Number(req.query['empresa_id']);
   const competencia = String(req.query['competencia'] ?? '');
   if (!empresaId || !/^\d{4}-\d{2}$/.test(competencia))
     return res.status(400).json({ erro: 'empresa_id e competencia (YYYY-MM) são obrigatórios' });
 
-  const r = await query(
-    `DELETE FROM notas WHERE empresa_id = $1 AND competencia = $2`,
-    [empresaId, competencia]
-  );
-  return res.json({ ok: true, excluidas: r.rowCount ?? 0 });
+  try {
+    const pedido = await solicitarExclusaoMes(empresaId, competencia, req.body?.motivo);
+    return res.status(202).json({ ok: true, pendente: true, exclusao: pedido });
+  } catch (err) { return responderErroExclusao(res, err); }
 });
 
 // POST /v1/notas — cria nota manual
