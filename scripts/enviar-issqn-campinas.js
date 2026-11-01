@@ -17,7 +17,11 @@ const https = require('https');
 const { chromium } = require('playwright');
 
 const API_BASE = process.env.CHC_API_BASE || 'https://chc-fiscal-production.up.railway.app';
-const API_KEY = process.env.CHC_API_KEY || 'Okc6EW2NRw3G5EuYisuwXo4ejEQQJsblIdnqYqzgQGE=';
+const API_KEY = process.env.CHC_API_KEY;
+if (!API_KEY) {
+  console.error('Defina a variável de ambiente CHC_API_KEY antes de rodar (ex.: set CHC_API_KEY=... no Prompt de Comando).');
+  process.exit(1);
+}
 // Arquivos gerados ficam aqui, separados por empresa — não na pasta temporária do Windows.
 const PASTA_BASE = process.env.CHC_PASTA_ISSQN || 'C:\\escritorio_virtual\\ISSQN Campinas - Servicos Tomados';
 

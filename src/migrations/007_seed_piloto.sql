@@ -1,7 +1,7 @@
 -- Seed dos 3 clientes-piloto — competência 09/2026
--- ATENÇÃO: as qyon_access_key abaixo são os valores reais do empresas.json.
--- Em produção, estas devem ser criptografadas. Por enquanto armazenadas em plain text
--- enquanto a camada de criptografia não for implementada.
+-- As migrations rodam a cada início do contêiner: este seed só cria a empresa se ela ainda
+-- não existir e nunca sobrescreve o cadastro. A qyon_access_key não fica no repositório:
+-- em banco novo entra vazia e deve ser preenchida no cadastro da empresa.
 
 INSERT INTO empresas (
   cnpj, nome, regime, ativo,
@@ -21,7 +21,7 @@ INSERT INTO empresas (
   '65996987000191',
   'Fernanda Mello - Projetos Sociais Ltda',
   'simples', true,
-  'b563a102f9eae96d513e20f60129504b',
+  '',
   'III',
   NULL, NULL, NULL, NULL, NULL,
   'cumulativo', NULL,
@@ -35,7 +35,7 @@ INSERT INTO empresas (
   '16622353000163',
   'L. de Santana Santos Condicionadores de AR',
   'simples', true,
-  'de7ab58211f364b173cbe4458d3fdeeb',
+  '',
   'III',
   NULL, NULL, NULL, NULL, NULL,
   'cumulativo', NULL,
@@ -49,7 +49,7 @@ INSERT INTO empresas (
   '53821590000260',
   'Doctor Medical RD Ltda',
   'presumido', true,
-  'c52712165996a3f22969f0315eefc3ea',
+  '',
   NULL,
   0.32, 0.08, 0.08,   -- presunção serviços/comércio/indústria (padrão)
   0.08, 0.12,         -- base hospitalar: IRPJ 8%, CSLL 12%
@@ -58,12 +58,4 @@ INSERT INTO empresas (
   NULL
 )
 
-ON CONFLICT (cnpj) DO UPDATE SET
-  nome               = EXCLUDED.nome,
-  regime             = EXCLUDED.regime,
-  qyon_access_key    = EXCLUDED.qyon_access_key,
-  anexo              = EXCLUDED.anexo,
-  presuncao_irpj     = EXCLUDED.presuncao_irpj,
-  presuncao_csll     = EXCLUDED.presuncao_csll,
-  aliquota_iss       = EXCLUDED.aliquota_iss,
-  atualizado_em      = NOW();
+ON CONFLICT (cnpj) DO NOTHING;
